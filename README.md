@@ -7,7 +7,7 @@ Crypto assets have differing yet high, specific risk, high correlations and impl
 
 ## System Design
 
-![swimming_pool](https://raw.githubusercontent.com/SWMPool/SwimmingPool/main/swimming_pool_system_design.jpg)
+![swimming_pool](https://github.com/SWMPool/SwimmingPool/blob/main/SwimmingPools.png?raw=true)
 
 ## Note
 
