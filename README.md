@@ -3,7 +3,7 @@
 ### Collateralised Stablecoin Protocol
 
 Swimming Pool is designed as a set of smart contracts to generate a risk-balanced, collateralised native stablecoin for the ICP ecosystem.
-Crypto assets have differing yet high, specific risks, high correlations, and implicit leverage. Swimming Pool is built upon single ‘Local’ asset-collateralised borrowing pools that create their own USD1 denominated stablecoins. Each Local stablecoin can be used (spent), or added to a global liquidity pool which generates the Swimming Pool basket of assets - the ‘Meta’ stablecoin.
+Crypto assets have differing yet high, specific risks, high correlations, and implicit leverage. Swimming Pool is built upon single ‘Local’ asset-collateralised borrowing pools that create their own USD denominated stablecoins. Each Local stablecoin can be used (spent), or added to a global liquidity pool which generates the Swimming Pool basket of assets - the ‘Meta’ stablecoin.
 
 ## System Design
 
