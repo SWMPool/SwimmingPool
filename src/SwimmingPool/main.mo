@@ -43,8 +43,10 @@ shared ({ caller = _owner }) actor class Borrow(
 
   public type DepositError = {
     #DepositInProgress;
+    #ReachedUnknownState;
+    #TransferFailed : { message : Text };
+    #MintFailed : { message : Text };
     #TransferFromError : T.TransferFromError;
-    #Unknown; // TODO: better error
   };
 
   let depositStates: HashMap.HashMap<Principal, DepositState> = HashMap.HashMap<Principal, DepositState>(10, Principal.equal, Principal.hash);
@@ -53,96 +55,74 @@ shared ({ caller = _owner }) actor class Borrow(
   // - user approves transfer: `token_a.icrc2_approve({ spender=borrow_canister; amount=amount; ... })`
   // - user deposits their token: `borrow_canister.deposit(amount)`
   public shared ({ caller }) func deposit(amount: DepositAmount) : async Result.Result<DepositAmount, DepositError> {
-    let existingState: ?DepositState = depositStates.get(caller);
+    var state : DepositState = Option.get(
+      depositStates.get(caller),
+      { amount; transfer = false; mint = false; inProgress = false }
+    );
 
-    Debug.print("Deposit state: " # debug_show(existingState));
+    // Handle the case where a deposit is in progress.
+    if (state.inProgress == true) {
+      return #err(#DepositInProgress);
+    };
 
-    switch existingState {
-      case (?state) {
-        switch state {
-          // Handle the case where a deposit is in progress.
-          case { inProgress = true } {
-            Debug.print("Deposit state: inprogress ");
+    // call transfer
+    if (state.transfer == false and state.mint == false) {
+      // lock
+      state := { state with inProgress = true };
+      depositStates.put(caller, state);
 
-            return #err(#DepositInProgress);
-          };
-          // call transfer
-          case { inProgress = false; transfer = false; mint = false } {
-            Debug.print("Deposit state: transfer ");
+      let transferResult = await transfer(caller, amount);
+      switch (transferResult) {
+        case (#ok(_)) {
+          // update state with successful transfer and release lock
+          state := { state with transfer = true; inProgress = false };
+          depositStates.put(caller, state);
+        };
+        case (#err(err)) {
+          // release lock
+          state := { state with inProgress = false };
+          depositStates.put(caller, state);
 
-            // lock
-            depositStates.put(caller, { state with inProgress = true });
-
-            let transferResult = await transfer(caller, amount);
-            switch (transferResult) {
-              case (#ok(_)) {
-                // update state with successful mint and release lock
-                depositStates.put(caller, { state with transfer = true; inProgress = false});
-
-                // continue with next steps
-                await deposit(amount);
-              };
-              case (#err(err)) {
-                Debug.print("Deposit state: " # debug_show(err));
-
-                // release lock
-                depositStates.put(caller, { state with inProgress = false});
-
-                // TODO: better error handling
-                return #err(#Unknown);
-              };
-            };
-          };
-          // call mint
-          case { inProgress = false; transfer = true; mint = false } {
-            Debug.print("Deposit state: mint ");
-
-            // lock
-            depositStates.put(caller, { state with inProgress = true });
-
-            let mintResult = await mint(caller, amount);
-            switch (mintResult) {
-              case (#ok(_)) {
-                // update state with successful mint and release lock
-                depositStates.put(caller, { state with mint = true; inProgress = false});
-
-                // continue with next steps
-                await deposit(amount);
-              };
-              case (#err(err)) {
-                // release lock
-                depositStates.put(caller, { state with inProgress = false});
-
-                // TODO: better error handling
-                return #err(#Unknown);
-              };
-            };
-          };
-          // end state
-          case { inProgress = false; transfer = true; mint = true } {
-            Debug.print("Deposit state: END ");
-
-            // remove deposit state
-            let _ = depositStates.delete(caller);
-            // TODO: better value to be returned
-            #ok(amount);
-          };
-          case _ {
-
-            Debug.print("Deposit state: UNKNOWN ");
-            return #err(#Unknown);
-          }
+          // TODO: better error handling
+          return #err(err);
         };
       };
-      case null {
-        Debug.print("Deposit state: null ");
+    };
 
-        let newState = { amount = amount; transfer = false; mint = false; inProgress = false };
-        depositStates.put(caller, newState);
+    // call mint
+    if (state.transfer == true and state.mint == false) {
+      // lock
+      state := { state with inProgress = true };
+      depositStates.put(caller, state);
 
-        await deposit(amount);
+      let mintResult = await mint(caller, amount);
+      switch (mintResult) {
+        case (#ok(_)) {
+          // update state with successful mint and release lock
+          state := { state with mint = true; inProgress = false};
+          depositStates.put(caller, state);
+        };
+        case (#err(err)) {
+          // release lock
+          state := { state with inProgress = false};
+          depositStates.put(caller, state);
+
+          // TODO: better error handling
+          return #err(err);
+        };
       };
     };
+
+    // end state
+    if (state.transfer == true and state.mint == true) {
+      // remove deposit state
+      let _ = depositStates.delete(caller);
+
+      // TODO: better value to be returned
+      return #ok(amount);
+    };
+
+    return #err(#ReachedUnknownState);
   };
 
   // TODO: fee calculations?
@@ -167,7 +147,7 @@ shared ({ caller = _owner }) actor class Borrow(
         case (#Err(err)) { return #err(#TransferFromError(err)); };
       };
     } catch (err) {
-      return #err(#Unknown);
+      return #err(#TransferFailed({ message = Error.message(err) }));
     };
   };
 
@@ -189,8 +169,9 @@ shared ({ caller = _owner }) actor class Borrow(
         case (#Ok(_)) { #ok(amount) };
         case (#Err(err)) { return #err(#TransferFromError(err)); };
       };
+
     } catch (err) {
-      return #err(#Unknown);
+      return #err(#MintFailed({ message = Error.message(err) }));
     };
   };
 
