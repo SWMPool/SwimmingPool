@@ -83,7 +83,6 @@ shared ({ caller = _owner }) actor class Borrow(
           state := { state with inProgress = false };
           depositStates.put(caller, state);
 
-          // TODO: better error handling
           return #err(err);
         };
       };
@@ -107,7 +106,6 @@ shared ({ caller = _owner }) actor class Borrow(
           state := { state with inProgress = false};
           depositStates.put(caller, state);
 
-          // TODO: better error handling
           return #err(err);
         };
       };
@@ -125,8 +123,12 @@ shared ({ caller = _owner }) actor class Borrow(
     return #err(#ReachedUnknownState);
   };
 
+  // Get state of deposit
+  public query func getDepositState(caller: Principal) : async ?DepositState {
+    depositStates.get(caller)
+  };
+
   // TODO: fee calculations?
-  // TODO: returning error result vs trapping
   public func transfer(caller: Principal, amount : DepositAmount) : async Result.Result<DepositAmount, DepositError> {
     try {
       // Perform the transfer, to capture the tokens.
@@ -174,5 +176,4 @@ shared ({ caller = _owner }) actor class Borrow(
       return #err(#MintFailed({ message = Error.message(err) }));
     };
   };
-
 };
