@@ -1,14 +1,22 @@
+import XRC "canister:xrc";
+
 import Principal "mo:base/Principal";
 import TrieMap "mo:base/TrieMap";
 import Result "mo:base/Result";
 import Option "mo:base/Option";
 import HashMap "mo:base/HashMap";
+import Cycles "mo:base/ExperimentalCycles";
 
 import T "Types2";
 
 import Debug "mo:base/Debug";
 import Blob "mo:base/Blob";
 import Error "mo:base/Error";
+import Float "mo:base/Float";
+import Nat64 "mo:base/Nat64";
+import Nat32 "mo:base/Nat32";
+import Uuid "mo:uuid/UUID";
+import Source "mo:uuid/Source";
 
 // track ownership of the borrow
 
@@ -18,6 +26,9 @@ shared ({ caller = _owner }) actor class Borrow(
     stable_token : Principal;
   }
 ) = this {
+  let tenPowerOfEight: Nat64 = 100000000;
+  let tenPowerOfThree: Nat64 = 1000;
+
   let coll_token_actor : T.TokenInterface = actor (Principal.toText(init_args.coll_token));
   let stable_token_actor : T.TokenInterface = actor (Principal.toText(init_args.stable_token));
 
@@ -94,8 +105,9 @@ shared ({ caller = _owner }) actor class Borrow(
       // lock
       state := { state with inProgress = true };
       depositStates.put(caller, state);
+      let mindAmount = await calculateMintAmount(amount);
 
-      let mintResult = await mint(caller, amount);
+      let mintResult = await mint(caller, Nat64.toNat(mindAmount));
       switch (mintResult) {
         case (#ok(_)) {
           // update state with successful mint and release lock
@@ -154,6 +166,9 @@ shared ({ caller = _owner }) actor class Borrow(
   // TODO: fee calculations?
   private func mint(caller: Principal, amount : DepositAmount) : async Result.Result<DepositAmount, DepositError> {
     try {
+      if ( amount == 0 ){
+        throw Error.reject("Unable to fetch rates from oracle.");
+      };
       // Perform the transfer, to mint the tokens to the caller.
       let mintResult = await stable_token_actor.icrc1_transfer({
         to = { owner = caller; subaccount = null };
@@ -174,5 +189,45 @@ shared ({ caller = _owner }) actor class Borrow(
       return #err(#MintFailed({ message = Error.message(err) }));
     };
   };
+
+  private func getCurrentRate(): async Nat64 {
+    let request : XRC.GetExchangeRateRequest = {
+      base_asset = {
+        symbol = "BTC";
+        class_ = #Cryptocurrency;
+      };
+      quote_asset = {
+        symbol = "USDT";
+        class_ = #Cryptocurrency;
+      };
+      // Get the current rate.
+      timestamp = null;
+    };
+
+    // Every XRC call needs 1B cycles.
+    Cycles.add(1_000_000_000);
+
+    let response = await XRC.get_exchange_rate(request);
+    let btcRateAndDecimal = transformRespone(response);
+
+    btcRateAndDecimal
+  };
+
+  private func transformRespone(e: XRC.GetExchangeRateResult): Nat64 {
+    switch(e) {
+      case (#Ok(rate_response)) {
+        return rate_response.rate;
+      };
+      case _ {
+        0
+      };
+    }
+  };
+
+  private func calculateMintAmount(amount: Nat): async Nat64 {
+    let getBtcRate: Nat64 = await getCurrentRate();
+
+    ((getBtcRate / tenPowerOfThree) * Nat64.fromNat(amount)) / tenPowerOfEight;
+  }
 
 };
