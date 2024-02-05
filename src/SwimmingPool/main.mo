@@ -1,44 +1,52 @@
 import Principal "mo:base/Principal";
-import TrieMap "mo:base/TrieMap";
+import Text "mo:base/Text";
+import Buffer "mo:base/Buffer";
 import Result "mo:base/Result";
 import Option "mo:base/Option";
 import HashMap "mo:base/HashMap";
+import Error "mo:base/Error";
+import Debug "mo:base/Debug";
+
+import LibUUID "mo:uuid/UUID";
+import Source "mo:uuid/async/SourceV4";
 
 import T "Types2";
 
-import Debug "mo:base/Debug";
-import Blob "mo:base/Blob";
-import Error "mo:base/Error";
-
-// track ownership of the borrow
-
 shared ({ caller = _owner }) actor class Borrow(
   init_args : {
-    coll_token : Principal;
+    collateral_token : Principal;
     stable_token : Principal;
   }
 ) = this {
-  let coll_token_actor : T.TokenInterface = actor (Principal.toText(init_args.coll_token));
-  let stable_token_actor : T.TokenInterface = actor (Principal.toText(init_args.stable_token));
+  // token actors
+  private let collateral_token_actor : T.TokenInterface = actor (Principal.toText(init_args.collateral_token));
+  private let stable_token_actor : T.TokenInterface = actor (Principal.toText(init_args.stable_token));
+  private let uuidGenerator = Source.Source();
 
-  // TODO: need to track the order in which the tokens are added
-  // need a better structure than map
-  private var coll_balances = TrieMap.TrieMap<Principal, Nat>(Principal.equal, Principal.hash);
+  // types
+  public type DepositAmount = Nat;
+  public type UUID = Text;
+  public type UUIDBuffer = Buffer.Buffer<UUID>;
 
-  public type WithdrawArgs = {
-    amount : Nat;
-    fee : ?Nat;
-    memo : ?Blob;
-    created_at_time : ?Nat64;
+  // state of deposit and withdraw operations
+  public type LoanState = {
+    depositTransfer: Bool;
+    depositMint : Bool;
+    withdrawTransfer : Bool;
+    withdrawBurn : Bool;
+    inProgress : Bool;
+  };
+
+  public type Loan = {
+    uuid: UUID;
+    principal: Principal;
+    depositAmount : DepositAmount;
+    state: LoanState;
   };
 
 
-  public type DepositAmount = Nat;
-  public type DepositState = {
-    amount : DepositAmount;
-    transfer: Bool;
-    mint : Bool;
-    inProgress : Bool;
+  public type LoanError = {
+    #LoanNotFound;
   };
 
   public type DepositError = {
@@ -47,92 +55,99 @@ shared ({ caller = _owner }) actor class Borrow(
     #TransferFailed : { message : Text };
     #MintFailed : { message : Text };
     #TransferFromError : T.TransferFromError;
+    #LoanError : LoanError;
   };
 
-  let depositStates: HashMap.HashMap<Principal, DepositState> = HashMap.HashMap<Principal, DepositState>(10, Principal.equal, Principal.hash);
+
+  // fast access to a loan by its UUID
+  let uuidToLoan: HashMap.HashMap<UUID, Loan> = HashMap.HashMap<UUID, Loan>(10, Text.equal, Text.hash);
+  // array to maintain order of loans
+  let activeLoans: UUIDBuffer = Buffer.Buffer<UUID>(10);
+  // fast access to loans by principal
+  let principalToLoans: HashMap.HashMap<Principal, UUIDBuffer> = HashMap.HashMap<Principal, UUIDBuffer>(10, Principal.equal, Principal.hash);
+
 
   // Accept deposits
   // - user approves transfer: `token_a.icrc2_approve({ spender=borrow_canister; amount=amount; ... })`
   // - user deposits their token: `borrow_canister.deposit(amount)`
-  public shared ({ caller }) func deposit(amount: DepositAmount) : async Result.Result<DepositAmount, DepositError> {
-    var state : DepositState = Option.get(
-      depositStates.get(caller),
-      { amount; transfer = false; mint = false; inProgress = false }
-    );
-
-    // Handle the case where a deposit is in progress.
-    if (state.inProgress == true) {
-      return #err(#DepositInProgress);
-    };
-
-    // call transfer
-    if (state.transfer == false and state.mint == false) {
-      // lock
-      state := { state with inProgress = true };
-      depositStates.put(caller, state);
-
-      let transferResult = await transfer(caller, amount);
-      switch (transferResult) {
-        case (#ok(_)) {
-          // update state with successful transfer and release lock
-          state := { state with transfer = true; inProgress = false };
-          depositStates.put(caller, state);
-        };
-        case (#err(err)) {
-          // release lock
-          state := { state with inProgress = false };
-          depositStates.put(caller, state);
-
-          return #err(err);
-        };
-      };
-    };
-
-    // call mint
-    if (state.transfer == true and state.mint == false) {
-      // lock
-      state := { state with inProgress = true };
-      depositStates.put(caller, state);
-
-      let mintResult = await mint(caller, amount);
-      switch (mintResult) {
-        case (#ok(_)) {
-          // update state with successful mint and release lock
-          state := { state with mint = true; inProgress = false};
-          depositStates.put(caller, state);
-        };
-        case (#err(err)) {
-          // release lock
-          state := { state with inProgress = false};
-          depositStates.put(caller, state);
-
-          return #err(err);
-        };
-      };
-    };
-
-    // end state
-    if (state.transfer == true and state.mint == true) {
-      // remove deposit state
-      let _ = depositStates.delete(caller);
-
-      // TODO: better value to be returned
-      return #ok(amount);
-    };
-
-    return #err(#ReachedUnknownState);
+  public shared ({ caller }) func deposit(amount : DepositAmount) : async Result.Result<UUID, DepositError> {
+    let loan = await newLoan(caller, amount);
+    return await deposit_helper(loan.uuid);
   };
 
-  // Get state of deposit
-  public query func getDepositState(caller: Principal) : async ?DepositState {
-    depositStates.get(caller)
+  // Retry deposit in case it fails at some point
+  // TODO: is caller check needed? At this point the loan should be in the system with the correct principal.
+  public func deposit_retry(loanUUID: UUID) : async Result.Result<UUID, DepositError> {
+    return await deposit_helper(loanUUID);
   };
+
+  // internal method that handles deposit logic
+  private func deposit_helper(loanUUID: UUID) : async Result.Result<UUID, DepositError> {
+    switch (getLoan(loanUUID)) {
+      case (#ok(loan)) {
+        // Handle the case where a deposit is in progress.
+        if (loan.state.inProgress == true) {
+          return #err(#DepositInProgress);
+        };
+
+        // call transfer
+        if (loan.state.depositTransfer == false and loan.state.depositMint == false) {
+          // lock
+          let _ = updateLoan({ loan with state = { loan.state with inProgress = true } });
+
+          let transferResult = await transfer(loan.principal, loan.depositAmount);
+          switch (transferResult) {
+            case (#ok(_)) {
+              // update state with successful transfer and release lock
+              let _ =  updateLoan({ loan with state = { loan.state with transfer = true; inProgress = false} });
+            };
+            case (#err(err)) {
+              // release lock
+              let _ =  updateLoan({ loan with state = { loan.state with inProgress = false} });
+              return #err(err);
+            };
+          };
+        };
+
+        // call mint
+        if (loan.state.depositTransfer == true and loan.state.depositMint == false) {
+          // lock
+          let _ = updateLoan({ loan with state = { loan.state with inProgress = true } });
+
+          let mintResult = await mint(loan.principal, loan.depositAmount);
+          switch (mintResult) {
+            case (#ok(_)) {
+              // update state with successful mint and release lock
+              let _ =  updateLoan({ loan with state = { loan.state with mint = true; inProgress = false} });
+            };
+            case (#err(err)) {
+              // release lock
+              let _ =  updateLoan({ loan with state = { loan.state with inProgress = false} });
+              return #err(err);
+            };
+          };
+        };
+
+        // end state
+        if (loan.state.depositTransfer == true and loan.state.depositMint == true) {
+          // TODO: better value to be returned
+          return #ok(loan.uuid);
+        };
+
+        return #err(#ReachedUnknownState);
+      };
+      case (#err(#LoanNotFound)) {
+        return #err(#LoanError(#LoanNotFound));
+      };
+    };
+  };
+
 
   // TODO: fee calculations?
   public func transfer(caller: Principal, amount : DepositAmount) : async Result.Result<DepositAmount, DepositError> {
     try {
       // Perform the transfer, to capture the tokens.
-      let transferResult = await coll_token_actor.icrc2_transfer_from({
+      let transferResult = await collateral_token_actor.icrc2_transfer_from({
         amount;
         from = { owner = caller; subaccount = null };
         to = { owner = Principal.fromActor(this); subaccount = null };
@@ -174,6 +189,66 @@ shared ({ caller = _owner }) actor class Borrow(
 
     } catch (err) {
       return #err(#MintFailed({ message = Error.message(err) }));
+    };
+  };
+
+  // LOAN HANDLERS
+  private func newLoan(principal: Principal, depositAmount : DepositAmount) : async Loan {
+    // TODO: how to use syncronius uuid generator?
+    let loan = {
+      uuid = LibUUID.toText(await uuidGenerator.new());
+      principal;
+      depositAmount;
+      state = {
+        depositTransfer = false;
+        depositMint = false;
+        withdrawTransfer = false;
+        withdrawBurn = false;
+        inProgress = false
+      };
+    };
+
+    let _ = uuidToLoan.put(loan.uuid, loan);
+    let _ = activeLoans.add(loan.uuid);
+    let _ = Option.get(principalToLoans.get(loan.principal), Buffer.Buffer<UUID>(2)).add(loan.uuid);
+
+    loan
+  };
+
+  private func deleteLoan(loanUUID: UUID) : Result.Result<Loan, LoanError> {
+    let loan = uuidToLoan.get(loanUUID);
+    switch (loan) {
+      case (?loan) {
+        activeLoans.filterEntries(func (_, uuid) { uuid == loanUUID });
+        return #ok(loan);
+      };
+      case (_) {
+        return #err(#LoanNotFound);
+      };
+    };
+  };
+
+  private func updateLoan(loan: Loan): Result.Result<UUID, LoanError> {
+    let oldLoanData = uuidToLoan.replace(loan.uuid, loan);
+    switch (oldLoanData) {
+      case (?loan) {
+        return #ok(loan.uuid);
+      };
+      case (_) {
+        return #err(#LoanNotFound);
+      };
+    };
+  };
+
+  private func getLoan(loanUUID: UUID) : Result.Result<Loan, LoanError> {
+    let loan = uuidToLoan.get(loanUUID);
+    switch (loan) {
+      case (?loan) {
+        return #ok(loan);
+      };
+      case (_) {
+        return #err(#LoanNotFound);
+      };
     };
   };
 };
