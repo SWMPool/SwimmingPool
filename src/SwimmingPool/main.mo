@@ -10,7 +10,7 @@ import Debug "mo:base/Debug";
 import LibUUID "mo:uuid/UUID";
 import Source "mo:uuid/async/SourceV4";
 
-import T "Types2";
+import ICRC2_T "ICRC2_Types";
 
 shared ({ caller = _owner }) actor class Borrow(
   init_args : {
@@ -19,8 +19,8 @@ shared ({ caller = _owner }) actor class Borrow(
   }
 ) = this {
   // token actors
-  private let collateral_token_actor : T.TokenInterface = actor (Principal.toText(init_args.collateral_token));
-  private let stable_token_actor : T.TokenInterface = actor (Principal.toText(init_args.stable_token));
+  private let collateral_token_actor : ICRC2_T.TokenInterface = actor (Principal.toText(init_args.collateral_token));
+  private let stable_token_actor : ICRC2_T.TokenInterface = actor (Principal.toText(init_args.stable_token));
   private let uuidGenerator = Source.Source();
 
   // types
@@ -54,7 +54,7 @@ shared ({ caller = _owner }) actor class Borrow(
     #ReachedUnknownState;
     #TransferFailed : { message : Text };
     #MintFailed : { message : Text };
-    #TransferFromError : T.TransferFromError;
+    #TransferFromError : ICRC2_T.TransferFromError;
     #LoanError : LoanError;
   };
 
@@ -89,7 +89,7 @@ shared ({ caller = _owner }) actor class Borrow(
   public query func getLoansByPrincipal(principal: Principal) : async Result.Result<[Loan], LoanError> {
     switch (principalToLoans.get(principal)) {
       case (?uuids) {
-        // mapFilter drops all null values
+        // mapFilter drops all null 
         let loansData: Buffer.Buffer<Loan> = Buffer.mapFilter<UUID, Loan>(uuids, func (uuid: UUID) {
           switch (getLoan(uuid)) {
             case (#ok(loan)) { ?loan };
@@ -104,7 +104,6 @@ shared ({ caller = _owner }) actor class Borrow(
       };
     };
   };
-
 
   // PRIVATE METHODS
   // internal method that handles deposit logic
