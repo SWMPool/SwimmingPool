@@ -15,8 +15,6 @@ import Error "mo:base/Error";
 import Float "mo:base/Float";
 import Nat64 "mo:base/Nat64";
 import Nat32 "mo:base/Nat32";
-import Uuid "mo:uuid/UUID";
-import Source "mo:uuid/Source";
 
 // track ownership of the borrow
 
@@ -58,6 +56,7 @@ shared ({ caller = _owner }) actor class Borrow(
     #TransferFailed : { message : Text };
     #MintFailed : { message : Text };
     #TransferFromError : T.TransferFromError;
+    #ExchangeRateError : XRC.ExchangeRateError;
   };
 
   let depositStates: HashMap.HashMap<Principal, DepositState> = HashMap.HashMap<Principal, DepositState>(10, Principal.equal, Principal.hash);
@@ -105,9 +104,8 @@ shared ({ caller = _owner }) actor class Borrow(
       // lock
       state := { state with inProgress = true };
       depositStates.put(caller, state);
-      let mindAmount = await calculateMintAmount(amount);
 
-      let mintResult = await mint(caller, Nat64.toNat(mindAmount));
+      let mintResult = await mint(caller, amount);
       switch (mintResult) {
         case (#ok(_)) {
           // update state with successful mint and release lock
@@ -166,31 +164,35 @@ shared ({ caller = _owner }) actor class Borrow(
   // TODO: fee calculations?
   private func mint(caller: Principal, amount : DepositAmount) : async Result.Result<DepositAmount, DepositError> {
     try {
-      if ( amount == 0 ){
-        throw Error.reject("Unable to fetch rates from oracle.");
+      let _ = switch(await calculateMintAmount(amount)) {
+        case(#ok(value)) {
+          let mintResult = await stable_token_actor.icrc1_transfer({
+            to = { owner = caller; subaccount = null };
+            amount = Nat64.toNat(value);
+            from_subaccount = null;
+            memo = null;
+            fee = null;
+            created_at_time = null;
+          });
+
+          // Check that the transfer was successful.
+          let transfer = switch (mintResult) {
+            case (#Ok(_)) { #ok(amount) };
+            case (#Err(err)) { #err(#TransferFromError(err)) };
+          };
+        };
+        case(#err(err)){
+          return #err(err)
+        }
       };
       // Perform the transfer, to mint the tokens to the caller.
-      let mintResult = await stable_token_actor.icrc1_transfer({
-        to = { owner = caller; subaccount = null };
-        amount = amount;
-        from_subaccount = null;
-        memo = null;
-        fee = null;
-        created_at_time = null;
-      });
-
-      // Check that the transfer was successful.
-      let transfer = switch (mintResult) {
-        case (#Ok(_)) { #ok(amount) };
-        case (#Err(err)) { return #err(#TransferFromError(err)); };
-      };
 
     } catch (err) {
       return #err(#MintFailed({ message = Error.message(err) }));
     };
   };
 
-  private func getCurrentRate(): async Nat64 {
+  private func getCurrentRate(): async Result.Result<Nat64, DepositError> {
     let request : XRC.GetExchangeRateRequest = {
       base_asset = {
         symbol = "BTC";
@@ -208,26 +210,30 @@ shared ({ caller = _owner }) actor class Borrow(
     Cycles.add(1_000_000_000);
 
     let response = await XRC.get_exchange_rate(request);
-    let btcRateAndDecimal = transformRespone(response);
-
-    btcRateAndDecimal
+    let _ = switch(transformRespone(response)){
+      case(#ok(value)) {#ok(value)};
+      case(#err(err)) {#err(err)};
+    }
   };
 
-  private func transformRespone(e: XRC.GetExchangeRateResult): Nat64 {
+  private func transformRespone(e: XRC.GetExchangeRateResult): Result.Result<Nat64, DepositError> {
     switch(e) {
       case (#Ok(rate_response)) {
-        return rate_response.rate;
+        return #ok(rate_response.rate);
       };
-      case _ {
-        0
+      case (#Err(err)) {
+        #err(#ExchangeRateError(err));
       };
     }
   };
 
-  private func calculateMintAmount(amount: Nat): async Nat64 {
-    let getBtcRate: Nat64 = await getCurrentRate();
-
-    ((getBtcRate / tenPowerOfThree) * Nat64.fromNat(amount)) / tenPowerOfEight;
+  private func calculateMintAmount(amount: Nat): async Result.Result<Nat64, DepositError> {
+    let _ = switch(await getCurrentRate()){
+      case(#ok(value)) {
+        #ok(((value / tenPowerOfThree) * Nat64.fromNat(amount)) / tenPowerOfEight);
+      };
+      case(#err(err)) {#err(err)};
+    }
   }
 
 };
