@@ -60,13 +60,13 @@ shared ({ caller = _owner }) actor class Borrow(
 
 
   // fast access to a loan by its UUID
-  let uuidToLoan: HashMap.HashMap<UUID, Loan> = HashMap.HashMap<UUID, Loan>(10, Text.equal, Text.hash);
+  private let uuidToLoan: HashMap.HashMap<UUID, Loan> = HashMap.HashMap<UUID, Loan>(10, Text.equal, Text.hash);
   // array to maintain order of loans
-  let activeLoans: UUIDBuffer = Buffer.Buffer<UUID>(10);
+  private let activeLoans: UUIDBuffer = Buffer.Buffer<UUID>(10);
   // fast access to loans by principal
-  let principalToLoans: HashMap.HashMap<Principal, UUIDBuffer> = HashMap.HashMap<Principal, UUIDBuffer>(10, Principal.equal, Principal.hash);
+  private let principalToLoans: HashMap.HashMap<Principal, UUIDBuffer> = HashMap.HashMap<Principal, UUIDBuffer>(10, Principal.equal, Principal.hash);
 
-
+  // SHARED METHODS
   // Accept deposits
   // - user approves transfer: `token_a.icrc2_approve({ spender=borrow_canister; amount=amount; ... })`
   // - user deposits their token: `borrow_canister.deposit(amount)`
@@ -81,6 +81,32 @@ shared ({ caller = _owner }) actor class Borrow(
     return await deposit_helper(loanUUID);
   };
 
+  // QUERY METHODS
+  public query func getLoanByUUID(loanUUID: UUID) : async Result.Result<Loan, LoanError> {
+    return getLoan(loanUUID);
+  };
+
+  public query func getLoansByPrincipal(principal: Principal) : async Result.Result<[Loan], LoanError> {
+    switch (principalToLoans.get(principal)) {
+      case (?uuids) {
+        // mapFilter drops all null values
+        let loansData: Buffer.Buffer<Loan> = Buffer.mapFilter<UUID, Loan>(uuids, func (uuid: UUID) {
+          switch (getLoan(uuid)) {
+            case (#ok(loan)) { ?loan };
+            case (#err(err)) { null };
+          };
+        });
+        
+        return #ok(Buffer.toArray(loansData));
+      };
+      case (_) {
+        return #ok([]);
+      };
+    };
+  };
+
+
+  // PRIVATE METHODS
   // internal method that handles deposit logic
   private func deposit_helper(loanUUID: UUID) : async Result.Result<UUID, DepositError> {
     switch (getLoan(loanUUID)) {
@@ -141,7 +167,6 @@ shared ({ caller = _owner }) actor class Borrow(
       };
     };
   };
-
 
   // TODO: fee calculations?
   public func transfer(caller: Principal, amount : DepositAmount) : async Result.Result<DepositAmount, DepositError> {
