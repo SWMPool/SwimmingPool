@@ -46,15 +46,19 @@ shared ({ caller = _owner }) actor class Borrow(
 
 
   public type LoanError = {
-    #LoanNotFound;
+    #LoanNotFound: { uuid: Text };
   };
 
-  public type DepositError = {
-    #DepositInProgress;
-    #ReachedUnknownState;
+  public type TransferError = {
     #TransferFailed : { message : Text };
     #MintFailed : { message : Text };
     #TransferFromError : ICRC2_T.TransferFromError;
+  };
+
+  public type DepositError = {
+    #DepositInProgress: { uuid: Text };
+    #ReachedUnknownState: { uuid: Text };
+    #TransferError : { error: TransferError ; uuid: Text };
     #LoanError : LoanError;
   };
 
@@ -110,65 +114,72 @@ shared ({ caller = _owner }) actor class Borrow(
   private func deposit_helper(loanUUID: UUID) : async Result.Result<UUID, DepositError> {
     switch (getLoan(loanUUID)) {
       case (#ok(loan)) {
+        var mutableLoan = loan;
+
         // Handle the case where a deposit is in progress.
-        if (loan.state.inProgress == true) {
-          return #err(#DepositInProgress);
+        if (mutableLoan.state.inProgress == true) {
+          return #err(#DepositInProgress({ uuid = loanUUID }));
         };
 
         // call transfer
-        if (loan.state.depositTransfer == false and loan.state.depositMint == false) {
+        if (mutableLoan.state.depositTransfer == false and mutableLoan.state.depositMint == false) {
           // lock
-          let _ = updateLoan({ loan with state = { loan.state with inProgress = true } });
+          mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
+          let _ = updateLoan(mutableLoan);
 
-          let transferResult = await transfer(loan.principal, loan.depositAmount);
+          let transferResult = await transfer(mutableLoan.principal, mutableLoan.depositAmount);
           switch (transferResult) {
             case (#ok(_)) {
               // update state with successful transfer and release lock
-              let _ =  updateLoan({ loan with state = { loan.state with transfer = true; inProgress = false} });
+              mutableLoan := { mutableLoan with state = { mutableLoan.state with depositTransfer = true; inProgress = false } };
+              let _ = updateLoan(mutableLoan);
             };
-            case (#err(err)) {
+            case (#err(error)) {
               // release lock
-              let _ =  updateLoan({ loan with state = { loan.state with inProgress = false} });
-              return #err(err);
+              mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = false } };
+              let _ = updateLoan(mutableLoan);
+              return #err(#TransferError{ error; uuid = loanUUID });
             };
           };
         };
 
         // call mint
-        if (loan.state.depositTransfer == true and loan.state.depositMint == false) {
+        if (mutableLoan.state.depositTransfer == true and mutableLoan.state.depositMint == false) {
           // lock
-          let _ = updateLoan({ loan with state = { loan.state with inProgress = true } });
+          mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
+          let _ = updateLoan(mutableLoan);
 
-          let mintResult = await mint(loan.principal, loan.depositAmount);
+          let mintResult = await mint(mutableLoan.principal, mutableLoan.depositAmount);
           switch (mintResult) {
             case (#ok(_)) {
               // update state with successful mint and release lock
-              let _ =  updateLoan({ loan with state = { loan.state with mint = true; inProgress = false} });
+              mutableLoan := { mutableLoan with state = { mutableLoan.state with depositMint = true; inProgress = false } };
+              let _ = updateLoan(mutableLoan);
             };
-            case (#err(err)) {
+            case (#err(error)) {
               // release lock
-              let _ =  updateLoan({ loan with state = { loan.state with inProgress = false} });
-              return #err(err);
+              mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = false } };
+              let _ = updateLoan(mutableLoan);
+              return #err(#TransferError{ error; uuid = loanUUID });
             };
           };
         };
 
         // end state
-        if (loan.state.depositTransfer == true and loan.state.depositMint == true) {
-          // TODO: better value to be returned
-          return #ok(loan.uuid);
+        if (mutableLoan.state.depositTransfer == true and mutableLoan.state.depositMint == true) {
+          return #ok(mutableLoan.uuid);
         };
 
-        return #err(#ReachedUnknownState);
+        return #err(#ReachedUnknownState({ uuid = loanUUID }));
       };
-      case (#err(#LoanNotFound)) {
-        return #err(#LoanError(#LoanNotFound));
+      case (#err(err)) {
+        return #err(#LoanError(err));
       };
     };
   };
 
   // TODO: fee calculations?
-  public func transfer(caller: Principal, amount : DepositAmount) : async Result.Result<DepositAmount, DepositError> {
+  public func transfer(caller: Principal, amount : DepositAmount) : async Result.Result<DepositAmount, TransferError> {
     try {
       // Perform the transfer, to capture the tokens.
       let transferResult = await collateral_token_actor.icrc2_transfer_from({
@@ -193,7 +204,7 @@ shared ({ caller = _owner }) actor class Borrow(
   };
 
   // TODO: fee calculations?
-  private func mint(caller: Principal, amount : DepositAmount) : async Result.Result<DepositAmount, DepositError> {
+  private func mint(caller: Principal, amount : DepositAmount) : async Result.Result<DepositAmount, TransferError> {
     try {
       // Perform the transfer, to mint the tokens to the caller.
       let mintResult = await stable_token_actor.icrc1_transfer({
@@ -247,7 +258,7 @@ shared ({ caller = _owner }) actor class Borrow(
         return #ok(loan);
       };
       case (_) {
-        return #err(#LoanNotFound);
+        return #err(#LoanNotFound({ uuid = loanUUID }));
       };
     };
   };
@@ -259,7 +270,7 @@ shared ({ caller = _owner }) actor class Borrow(
         return #ok(loan.uuid);
       };
       case (_) {
-        return #err(#LoanNotFound);
+        return #err(#LoanNotFound({ uuid = loan.uuid }));
       };
     };
   };
@@ -271,7 +282,7 @@ shared ({ caller = _owner }) actor class Borrow(
         return #ok(loan);
       };
       case (_) {
-        return #err(#LoanNotFound);
+        return #err(#LoanNotFound({ uuid = loanUUID }));
       };
     };
   };
