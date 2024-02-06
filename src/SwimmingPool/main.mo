@@ -14,22 +14,23 @@ import ICRC2_T "ICRC2_Types";
 import T "Types";
 
 shared ({ caller = _owner }) actor class Borrow(
-  init_args : {
-    collateral_token : Principal;
-    stable_token : Principal;
+  initArgs : {
+    collateralToken : Principal;
+    stableToken : Principal;
   }
 ) = this {
   // token actors
-  private let collateral_token_actor : ICRC2_T.TokenInterface = actor (Principal.toText(init_args.collateral_token));
-  private let stable_token_actor : ICRC2_T.TokenInterface = actor (Principal.toText(init_args.stable_token));
+  private let collateralTokenActor : ICRC2_T.TokenInterface = actor (Principal.toText(initArgs.collateralToken));
+  private let stableTokenActor : ICRC2_T.TokenInterface = actor (Principal.toText(initArgs.stableToken));
   private let uuidGenerator = Source.Source();
 
+  private let initialBufferCapacity = 10;
   // fast access to a loan by its UUID
-  private let loanByUUID = HashMap.HashMap<T.UUID, T.Loan>(10, Text.equal, Text.hash);
+  private let loanByUUID = HashMap.HashMap<T.UUID, T.Loan>(initialBufferCapacity, Text.equal, Text.hash);
   // array to maintain order of loans
-  private let activeLoans: T.UUIDBuffer = Buffer.Buffer<T.UUID>(10);
+  private let activeLoans: T.UUIDBuffer = Buffer.Buffer<T.UUID>(initialBufferCapacity);
   // fast access to loans by principal
-  private let loansByPrincipal = HashMap.HashMap<Principal, T.UUIDBuffer>(10, Principal.equal, Principal.hash);
+  private let loansByPrincipal = HashMap.HashMap<Principal, T.UUIDBuffer>(initialBufferCapacity, Principal.equal, Principal.hash);
 
   // SHARED METHODS
   // Accept deposits
@@ -37,13 +38,13 @@ shared ({ caller = _owner }) actor class Borrow(
   // - user deposits their token: `borrow_canister.deposit(amount)`
   public shared ({ caller }) func deposit(amount : T.DepositAmount) : async Result.Result<T.UUID, T.DepositError> {
     let loan = await newLoan(caller, amount);
-    return await deposit_helper(loan.uuid);
+    return await depositHelper(loan.uuid);
   };
 
   // Retry deposit in case it fails at some point
   // TODO: is caller check needed? At this point the loan should be in the system with the correct principal.
-  public func deposit_retry(loanUUID: T.UUID) : async Result.Result<T.UUID, T.DepositError> {
-    return await deposit_helper(loanUUID);
+  public func depositRetry(loanUUID: T.UUID) : async Result.Result<T.UUID, T.DepositError> {
+    return await depositHelper(loanUUID);
   };
 
   // QUERY METHODS
@@ -72,7 +73,7 @@ shared ({ caller = _owner }) actor class Borrow(
 
   // PRIVATE METHODS
   // internal method that handles deposit logic
-  private func deposit_helper(loanUUID: T.UUID) : async Result.Result<T.UUID, T.DepositError> {
+  private func depositHelper(loanUUID: T.UUID) : async Result.Result<T.UUID, T.DepositError> {
     switch (getLoan(loanUUID)) {
       case (#ok(loan)) {
         var mutableLoan = loan;
@@ -143,7 +144,7 @@ shared ({ caller = _owner }) actor class Borrow(
   public func transfer(caller: Principal, amount : T.DepositAmount) : async Result.Result<T.DepositAmount, T.TransferError> {
     try {
       // Perform the transfer, to capture the tokens.
-      let transferResult = await collateral_token_actor.icrc2_transfer_from({
+      let transferResult = await collateralTokenActor.icrc2_transfer_from({
         amount;
         from = { owner = caller; subaccount = null };
         to = { owner = Principal.fromActor(this); subaccount = null };
@@ -167,7 +168,7 @@ shared ({ caller = _owner }) actor class Borrow(
   private func mint(caller: Principal, amount : T.DepositAmount) : async Result.Result<T.DepositAmount, T.TransferError> {
     try {
       // Perform the transfer, to mint the tokens to the caller.
-      let mintResult = await stable_token_actor.icrc1_transfer({
+      let mintResult = await stableTokenActor.icrc1_transfer({
         to = { owner = caller; subaccount = null };
         amount = amount;
         from_subaccount = null;
@@ -204,7 +205,7 @@ shared ({ caller = _owner }) actor class Borrow(
 
     let _ = loanByUUID.put(loan.uuid, loan);
     let _ = activeLoans.add(loan.uuid);
-    let _ = Option.get(loansByPrincipal.get(loan.principal), Buffer.Buffer<T.UUID>(2)).add(loan.uuid);
+    let _ = Option.get(loansByPrincipal.get(loan.principal), Buffer.Buffer<T.UUID>(initialBufferCapacity)).add(loan.uuid);
 
     loan
   };
