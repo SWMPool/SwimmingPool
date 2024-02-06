@@ -18,7 +18,7 @@ dfx deploy collateral_token --upgrade-unchanged --argument '
         };
       };
       metadata = vec {};
-      transfer_fee = 10_000;
+      transfer_fee = 0;
       archive_options = record {
         trigger_threshold = 2000;
         num_blocks_to_archive = 1000;
@@ -47,7 +47,7 @@ dfx deploy stable_token --upgrade-unchanged --argument '
       };
       initial_balances = vec {};
       metadata = vec {};
-      transfer_fee = 10_000;
+      transfer_fee = 0;
       archive_options = record {
         trigger_threshold = 2000;
         num_blocks_to_archive = 1000;
@@ -64,7 +64,7 @@ dfx deploy stable_token --upgrade-unchanged --argument '
 ```
 dfx deploy borrow --upgrade-unchanged --argument '(
   record {
-    coll_token = (principal "'${COLLATERAL_TOKE_CANISTER_ID}'");
+    collateral_token = (principal "'${COLLATERAL_TOKE_CANISTER_ID}'");
     stable_token = (principal "'${STABLE_TOKE_CANISTER_ID}'");
   }
 )'
@@ -93,6 +93,6 @@ dfx canister call stable_token icrc2_approve '(record {
 
 ```
 dfx canister call borrow withdraw '(record {
-    amount = 90_000;
+    amount = 100_000;
   })' --identity <SOME_IDENTITY>
 ```

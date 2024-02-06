@@ -40,6 +40,10 @@ shared ({ caller = _owner }) actor class Borrow(
     return await deposit_helper(loan.uuid);
   };
 
+  public shared ({ caller }) func withdraw(loanUUID: T.UUID) : async Result.Result<T.UUID, T.WithdrawError> {
+    return await withdraw_helper(loanUUID);
+  };
+
   // Retry deposit in case it fails at some point
   // TODO: is caller check needed? At this point the loan should be in the system with the correct principal.
   public func deposit_retry(loanUUID: T.UUID) : async Result.Result<T.UUID, T.DepositError> {
@@ -71,6 +75,71 @@ shared ({ caller = _owner }) actor class Borrow(
   };
 
   // PRIVATE METHODS
+  private func withdraw_helper(loanUUID: T.UUID) : async Result.Result<T.UUID, T.WithdrawError> {
+    switch (getLoan(loanUUID)) {
+      case (#ok(loan)) {
+        var mutableLoan = loan;
+
+        // Handle the case where a withdraw is in progress.
+        if (mutableLoan.state.inProgress == true) {
+          return #err(#WithdrawInProgress({ uuid = loanUUID }));
+        };
+
+        // call transfer which in this case acts as an burning transaction
+        if (mutableLoan.state.withdrawTransfer == false and mutableLoan.state.withdrawBurn == false) {
+          // lock
+          mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
+          let _ = updateLoan(mutableLoan);
+
+          let burnTokens = await transfer(mutableLoan.principal, mutableLoan.depositAmount, stable_token_actor);
+          switch (burnTokens) {
+            case (#ok(_)) {
+              // update state with successful burn and release lock
+              mutableLoan := { mutableLoan with state = { mutableLoan.state with withdrawBurn = true; inProgress = false } };
+              let _ = updateLoan(mutableLoan);
+            };
+            case (#err(error)) {
+              // release lock
+              mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = false } };
+              let _ = updateLoan(mutableLoan);
+              return #err(#TransferError{ error; uuid = loanUUID });
+            };
+          };
+        };
+
+        if (mutableLoan.state.withdrawTransfer == false and mutableLoan.state.withdrawBurn == true) {
+          // lock
+          mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
+          let _ = updateLoan(mutableLoan);
+          let transferResult = await handle_tokens(mutableLoan.principal, mutableLoan.depositAmount, collateral_token_actor);
+          switch (transferResult) {
+            case (#ok(_)) {
+              // update state with successful transfer and release lock
+              mutableLoan := { mutableLoan with state = { mutableLoan.state with withdrawTransfer = true; inProgress = false } };
+              let _ = updateLoan(mutableLoan);
+            };
+            case (#err(error)) {
+              // release lock
+              mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = false } };
+              let _ = updateLoan(mutableLoan);
+              return #err(#TransferError{ error; uuid = loanUUID });
+            };
+          };
+        };
+
+        // end state
+        if (mutableLoan.state.withdrawTransfer == true and mutableLoan.state.withdrawBurn == true) {
+          return #ok(mutableLoan.uuid);
+        };
+
+        return #err(#ReachedUnknownState({ uuid = loanUUID }));
+      };
+      case (#err(err)) {
+        #err(#LoanError(err));
+      };
+    }
+  };
+
   // internal method that handles deposit logic
   private func deposit_helper(loanUUID: T.UUID) : async Result.Result<T.UUID, T.DepositError> {
     switch (getLoan(loanUUID)) {
@@ -88,7 +157,7 @@ shared ({ caller = _owner }) actor class Borrow(
           mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
           let _ = updateLoan(mutableLoan);
 
-          let transferResult = await transfer(mutableLoan.principal, mutableLoan.depositAmount);
+          let transferResult = await transfer(mutableLoan.principal, mutableLoan.depositAmount, collateral_token_actor);
           switch (transferResult) {
             case (#ok(_)) {
               // update state with successful transfer and release lock
@@ -110,7 +179,7 @@ shared ({ caller = _owner }) actor class Borrow(
           mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
           let _ = updateLoan(mutableLoan);
 
-          let mintResult = await mint(mutableLoan.principal, mutableLoan.depositAmount);
+          let mintResult = await handle_tokens(mutableLoan.principal, mutableLoan.depositAmount, stable_token_actor);
           switch (mintResult) {
             case (#ok(_)) {
               // update state with successful mint and release lock
@@ -140,10 +209,10 @@ shared ({ caller = _owner }) actor class Borrow(
   };
 
   // TODO: fee calculations?
-  public func transfer(caller: Principal, amount : T.DepositAmount) : async Result.Result<T.DepositAmount, T.TransferError> {
+  public func transfer(caller: Principal, amount : T.DepositAmount, token_actor: ICRC2_T.TokenInterface) : async Result.Result<T.DepositAmount, T.TransferError> {
     try {
-      // Perform the transfer, to capture the tokens.
-      let transferResult = await collateral_token_actor.icrc2_transfer_from({
+      // Depending on which actor calls it, acts as an burn or transfer.
+      let transferResult = await token_actor.icrc2_transfer_from({
         amount;
         from = { owner = caller; subaccount = null };
         to = { owner = Principal.fromActor(this); subaccount = null };
@@ -164,10 +233,10 @@ shared ({ caller = _owner }) actor class Borrow(
   };
 
   // TODO: fee calculations?
-  private func mint(caller: Principal, amount : T.DepositAmount) : async Result.Result<T.DepositAmount, T.TransferError> {
+  private func handle_tokens(caller: Principal, amount : T.DepositAmount, token_actor: ICRC2_T.TokenInterface) : async Result.Result<T.DepositAmount, T.TransferError> {
     try {
-      // Perform the transfer, to mint the tokens to the caller.
-      let mintResult = await stable_token_actor.icrc1_transfer({
+      // Depending on which actor calls it, this method acts as an transfer or mint.
+      let mintResult = await token_actor.icrc1_transfer({
         to = { owner = caller; subaccount = null };
         amount = amount;
         from_subaccount = null;

@@ -39,4 +39,11 @@ module {
     #TransferError : { error: TransferError ; uuid: Text };
     #LoanError : LoanError;
   };
+
+  public type WithdrawError = {
+    #WithdrawInProgress: { uuid: Text };
+    #TransferError : { error: TransferError ; uuid: Text };
+    #LoanError : LoanError;
+    #ReachedUnknownState: { uuid: Text };
+  }
 }
