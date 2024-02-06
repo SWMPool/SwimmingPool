@@ -194,7 +194,6 @@ shared ({ caller = _owner }) actor class Borrow(
 
       // Check that the transfer was successful.
       let transfer = switch (transferResult) {
-        // TODO: is this the best return value? Maybe something more significant can be returned?
         case (#Ok(_)) { #ok(amount) };
         case (#Err(err)) { return #err(#TransferFromError(err)); };
       };
@@ -229,7 +228,6 @@ shared ({ caller = _owner }) actor class Borrow(
 
   // LOAN HANDLERS
   private func newLoan(principal: Principal, depositAmount : DepositAmount) : async Loan {
-    // TODO: how to use syncronius uuid generator?
     let loan = {
       uuid = LibUUID.toText(await uuidGenerator.new());
       principal;
