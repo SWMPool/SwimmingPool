@@ -1,6 +1,7 @@
 import Principal "mo:base/Principal";
 import Text "mo:base/Text";
-import Buffer "mo:base/Buffer"; 
+import Buffer "mo:base/Buffer";
+import Iter "mo:base/Iter";
 import Result "mo:base/Result";
 import Option "mo:base/Option";
 import HashMap "mo:base/HashMap";
@@ -19,18 +20,25 @@ shared ({ caller = _owner }) actor class Borrow(
     stableToken : Principal;
   }
 ) = this {
-  // token actors
+  // Token actors
   private let collateralTokenActor : ICRC2_T.TokenInterface = actor (Principal.toText(initArgs.collateralToken));
   private let stableTokenActor : ICRC2_T.TokenInterface = actor (Principal.toText(initArgs.stableToken));
   private let uuidGenerator = Source.Source();
 
+  // Data storage
   private let initialBufferCapacity = 10;
   // fast access to a loan by its UUID
-  private let loanByUUID = HashMap.HashMap<T.UUID, T.Loan>(initialBufferCapacity, Text.equal, Text.hash);
+  private var loanByUUID = HashMap.HashMap<T.UUID, T.Loan>(initialBufferCapacity, Text.equal, Text.hash);
   // array to maintain order of loans
-  private let activeLoans: T.UUIDBuffer = Buffer.Buffer<T.UUID>(initialBufferCapacity);
+  private var activeLoans: T.UUIDBuffer = Buffer.Buffer<T.UUID>(initialBufferCapacity);
   // fast access to loans by principal
-  private let loansByPrincipal = HashMap.HashMap<Principal, T.UUIDBuffer>(initialBufferCapacity, Principal.equal, Principal.hash);
+  private var loansByPrincipal = HashMap.HashMap<Principal, T.UUIDBuffer>(initialBufferCapacity, Principal.equal, Principal.hash);
+
+  // Stable storage
+  private stable var loanByUUIDStable: [(T.UUID, T.Loan)] = [];
+  private stable var activeLoansStable: [T.UUID] = [];
+  private stable var loansByPrincipalStable: [(Principal, [T.UUID])] = [];
+
 
   // SHARED METHODS
   // Accept deposits
@@ -245,5 +253,41 @@ shared ({ caller = _owner }) actor class Borrow(
         return #err(#LoanNotFound({ uuid = loanUUID }));
       };
     };
+  };
+
+  // UPGRADE METHODS
+  system func preupgrade() : () {
+    loanByUUIDStable := Iter.toArray<(T.UUID, T.Loan)>(loanByUUID.entries());
+
+    activeLoansStable := Iter.toArray<T.UUID>(activeLoans.vals());
+
+    loansByPrincipalStable := Iter.toArray<(Principal, [T.UUID])>(
+      Iter.map<(Principal, T.UUIDBuffer), (Principal, [T.UUID])>(
+        loansByPrincipal.entries(),
+        func (entry: (Principal, T.UUIDBuffer)) {
+          let (principal, buffer) = entry;
+          return (principal, Buffer.toArray(buffer));
+        }
+      )
+    );
+  };
+
+  system func postupgrade() : () {
+    loanByUUID := HashMap.fromIter(Iter.fromArray(loanByUUIDStable), loanByUUIDStable.size(), Text.equal, Text.hash);
+
+    activeLoans := Buffer.fromArray(activeLoansStable);
+
+    loansByPrincipal := HashMap.fromIter<Principal, T.UUIDBuffer>(
+      Iter.map<(Principal, [T.UUID]), (Principal, T.UUIDBuffer)>(
+        Iter.fromArray(loansByPrincipalStable),
+        func (entry: (Principal, [T.UUID])) {
+          let (principal, uuids) = entry;
+          return (principal, Buffer.fromArray(uuids));
+        }
+      ),
+      loanByUUIDStable.size(),
+      Principal.equal,
+      Principal.hash
+    );
   };
 };
