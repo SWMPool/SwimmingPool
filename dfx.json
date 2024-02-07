@@ -2,7 +2,8 @@
   "canisters": {
     "borrow": {
       "main": "src/SwimmingPool/main.mo",
-      "type": "motoko"
+      "type": "motoko",
+      "dependencies": ["xrc"]
     },
     "collateral_token": {
       "type": "custom",
@@ -13,9 +14,22 @@
       "type": "custom",
       "candid": "https://raw.githubusercontent.com/dfinity/ic/2e3589427cd9648d4edaebc1b96b5daf8fdd94d8/rs/rosetta-api/icrc1/ledger/ledger.did",
       "wasm": "https://download.dfinity.systems/ic/2e3589427cd9648d4edaebc1b96b5daf8fdd94d8/canisters/ic-icrc1-ledger.wasm.gz"
+    },
+    "xrc": {
+      "type": "custom",
+      "candid": "xrc/xrc.did",
+      "wasm": "xrc/xrc.wasm.gz"
+    }
+  },
+  "networks": {
+    "local": {
+      "bind": "127.0.0.1:4812"
     }
   },
   "defaults": {
+    "replica": {
+      "subnet_type": "system"
+    },
     "build": {
       "packtool": "mops sources",
       "args": ""

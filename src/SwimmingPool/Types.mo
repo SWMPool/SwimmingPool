@@ -1,3 +1,6 @@
+
+import XRC "canister:xrc";
+
 import Buffer "mo:base/Buffer"; 
 import ICRC2_T "ICRC2_Types";
 
@@ -39,6 +42,10 @@ module {
     #LoanNotFound: { uuid: Text };
   };
 
+  public type XRCError = {
+    #ExchangeRateError: XRC.ExchangeRateError;
+  };
+
   // icrc2 token transfer errors
   public type TokenTransferError = {
     #TransferFailed : { message : Text };
@@ -53,5 +60,6 @@ module {
     #TokenTransfer : { error: TokenTransferError; uuid: Text };
     #Loan : LoanError;
     #ReachedUnknownState: { uuid: Text };
+    #ExchangeRate : XRCError;
   };
 }
