@@ -30,15 +30,14 @@ shared ({ caller = _owner }) actor class Borrow(
   // fast access to a loan by its UUID
   private var loanByUUID = HashMap.HashMap<T.UUID, T.Loan>(initialBufferCapacity, Text.equal, Text.hash);
   // array to maintain order of loans
-  private var activeLoans: T.UUIDBuffer = Buffer.Buffer<T.UUID>(initialBufferCapacity);
+  private var activeLoans : T.UUIDBuffer = Buffer.Buffer<T.UUID>(initialBufferCapacity);
   // fast access to loans by principal
   private var loansByPrincipal = HashMap.HashMap<Principal, T.UUIDBuffer>(initialBufferCapacity, Principal.equal, Principal.hash);
 
   // Stable storage
-  private stable var loanByUUIDStable: [(T.UUID, T.Loan)] = [];
-  private stable var activeLoansStable: [T.UUID] = [];
-  private stable var loansByPrincipalStable: [(Principal, [T.UUID])] = [];
-
+  private stable var loanByUUIDStable : [(T.UUID, T.Loan)] = [];
+  private stable var activeLoansStable : [T.UUID] = [];
+  private stable var loansByPrincipalStable : [(Principal, [T.UUID])] = [];
 
   // SHARED METHODS
   // Accept deposits
@@ -49,32 +48,39 @@ shared ({ caller = _owner }) actor class Borrow(
     return await depositHelper(loan.uuid);
   };
 
-  public shared ({ caller }) func withdraw(loanUUID: T.UUID) : async Result.Result<T.UUID, T.TransferError> {
+  // Withdraw deposits
+  // Accept deposits
+  // - user approves transfer: `collateral_token.icrc2_approve({ spender=borrow_canister; amount=amount; ... })`
+  // - user deposits their token: `borrow_canister.deposit(amount)`
+  public shared ({ caller }) func withdraw(loanUUID : T.UUID) : async Result.Result<T.UUID, T.TransferError> {
     return await withdrawHelper(loanUUID);
   };
 
   // Retry deposit in case it fails at some point
   // TODO: is caller check needed? At this point the loan should be in the system with the correct principal.
-  public func depositRetry(loanUUID: T.UUID) : async Result.Result<T.UUID, T.TransferError> {
+  public func depositRetry(loanUUID : T.UUID) : async Result.Result<T.UUID, T.TransferError> {
     return await depositHelper(loanUUID);
   };
 
   // QUERY METHODS
-  public query func getLoanByUUID(loanUUID: T.UUID) : async Result.Result<T.Loan, T.LoanError> {
+  public query func getLoanByUUID(loanUUID : T.UUID) : async Result.Result<T.Loan, T.LoanError> {
     return getLoan(loanUUID);
   };
 
-  public query func getLoansByPrincipal(principal: Principal) : async Result.Result<[T.Loan], T.LoanError> {
+  public query func getLoansByPrincipal(principal : Principal) : async Result.Result<[T.Loan], T.LoanError> {
     switch (loansByPrincipal.get(principal)) {
       case (?uuids) {
-        // mapFilter drops all null 
-        let loansData: Buffer.Buffer<T.Loan> = Buffer.mapFilter<T.UUID, T.Loan>(uuids, func (uuid: T.UUID) {
-          switch (getLoan(uuid)) {
-            case (#ok(loan)) { ?loan };
-            case (#err(err)) { null };
-          };
-        });
-        
+        // mapFilter drops all null
+        let loansData : Buffer.Buffer<T.Loan> = Buffer.mapFilter<T.UUID, T.Loan>(
+          uuids,
+          func(uuid : T.UUID) {
+            switch (getLoan(uuid)) {
+              case (#ok(loan)) { ?loan };
+              case (#err(err)) { null };
+            };
+          },
+        );
+
         return #ok(Buffer.toArray(loansData));
       };
       case (_) {
@@ -84,7 +90,7 @@ shared ({ caller = _owner }) actor class Borrow(
   };
 
   // PRIVATE METHODS
-  private func withdrawHelper(loanUUID: T.UUID) : async Result.Result<T.UUID, T.TransferError> {
+  private func withdrawHelper(loanUUID : T.UUID) : async Result.Result<T.UUID, T.TransferError> {
     switch (getLoan(loanUUID)) {
       case (#ok(loan)) {
         var mutableLoan = loan;
@@ -97,7 +103,11 @@ shared ({ caller = _owner }) actor class Borrow(
         // call transfer which in this case acts as an burning transaction
         if (mutableLoan.state.withdrawTransfer == false and mutableLoan.state.withdrawBurn == false) {
           // lock
-          mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
+          mutableLoan := {
+            mutableLoan with state = {
+              mutableLoan.state with inProgress = true
+            };
+          };
           let _ = updateLoan(mutableLoan);
 
           let burnTokens = await tokenTransfer({
@@ -109,21 +119,34 @@ shared ({ caller = _owner }) actor class Borrow(
           switch (burnTokens) {
             case (#ok(_)) {
               // update state with successful burn and release lock
-              mutableLoan := { mutableLoan with state = { mutableLoan.state with withdrawBurn = true; inProgress = false } };
+              mutableLoan := {
+                mutableLoan with state = {
+                  mutableLoan.state with withdrawBurn = true;
+                  inProgress = false;
+                };
+              };
               let _ = updateLoan(mutableLoan);
             };
             case (#err(error)) {
               // release lock
-              mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = false } };
+              mutableLoan := {
+                mutableLoan with state = {
+                  mutableLoan.state with inProgress = false
+                };
+              };
               let _ = updateLoan(mutableLoan);
-              return #err(#TokenTransfer{ error; uuid = loanUUID });
+              return #err(#TokenTransfer { error; uuid = loanUUID });
             };
           };
         };
 
         if (mutableLoan.state.withdrawTransfer == false and mutableLoan.state.withdrawBurn == true) {
           // lock
-          mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
+          mutableLoan := {
+            mutableLoan with state = {
+              mutableLoan.state with inProgress = true
+            };
+          };
           let _ = updateLoan(mutableLoan);
 
           let transferResult = await tokenTransfer({
@@ -135,14 +158,23 @@ shared ({ caller = _owner }) actor class Borrow(
           switch (transferResult) {
             case (#ok(_)) {
               // update state with successful transfer and release lock
-              mutableLoan := { mutableLoan with state = { mutableLoan.state with withdrawTransfer = true; inProgress = false } };
+              mutableLoan := {
+                mutableLoan with state = {
+                  mutableLoan.state with withdrawTransfer = true;
+                  inProgress = false;
+                };
+              };
               let _ = updateLoan(mutableLoan);
             };
             case (#err(error)) {
               // release lock
-              mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = false } };
+              mutableLoan := {
+                mutableLoan with state = {
+                  mutableLoan.state with inProgress = false
+                };
+              };
               let _ = updateLoan(mutableLoan);
-              return #err(#TokenTransfer{ error; uuid = loanUUID });
+              return #err(#TokenTransfer { error; uuid = loanUUID });
             };
           };
         };
@@ -157,11 +189,11 @@ shared ({ caller = _owner }) actor class Borrow(
       case (#err(err)) {
         #err(#Loan(err));
       };
-    }
+    };
   };
 
   // internal method that handles deposit logic
-  private func depositHelper(loanUUID: T.UUID) : async Result.Result<T.UUID, T.TransferError> {
+  private func depositHelper(loanUUID : T.UUID) : async Result.Result<T.UUID, T.TransferError> {
     switch (getLoan(loanUUID)) {
       case (#ok(loan)) {
         var mutableLoan = loan;
@@ -174,7 +206,11 @@ shared ({ caller = _owner }) actor class Borrow(
         // call transfer
         if (mutableLoan.state.depositTransfer == false and mutableLoan.state.depositMint == false) {
           // lock
-          mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
+          mutableLoan := {
+            mutableLoan with state = {
+              mutableLoan.state with inProgress = true
+            };
+          };
           let _ = updateLoan(mutableLoan);
 
           let transferResult = await tokenTransfer({
@@ -186,14 +222,23 @@ shared ({ caller = _owner }) actor class Borrow(
           switch (transferResult) {
             case (#ok(_)) {
               // update state with successful transfer and release lock
-              mutableLoan := { mutableLoan with state = { mutableLoan.state with depositTransfer = true; inProgress = false } };
+              mutableLoan := {
+                mutableLoan with state = {
+                  mutableLoan.state with depositTransfer = true;
+                  inProgress = false;
+                };
+              };
               let _ = updateLoan(mutableLoan);
             };
             case (#err(error)) {
               // release lock
-              mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = false } };
+              mutableLoan := {
+                mutableLoan with state = {
+                  mutableLoan.state with inProgress = false
+                };
+              };
               let _ = updateLoan(mutableLoan);
-              return #err(#TokenTransfer{ error; uuid = loanUUID });
+              return #err(#TokenTransfer { error; uuid = loanUUID });
             };
           };
         };
@@ -201,7 +246,11 @@ shared ({ caller = _owner }) actor class Borrow(
         // call mint
         if (mutableLoan.state.depositTransfer == true and mutableLoan.state.depositMint == false) {
           // lock
-          mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
+          mutableLoan := {
+            mutableLoan with state = {
+              mutableLoan.state with inProgress = true
+            };
+          };
           let _ = updateLoan(mutableLoan);
 
           let mintResult = await tokenTransfer({
@@ -213,14 +262,23 @@ shared ({ caller = _owner }) actor class Borrow(
           switch (mintResult) {
             case (#ok(_)) {
               // update state with successful mint and release lock
-              mutableLoan := { mutableLoan with state = { mutableLoan.state with depositMint = true; inProgress = false } };
+              mutableLoan := {
+                mutableLoan with state = {
+                  mutableLoan.state with depositMint = true;
+                  inProgress = false;
+                };
+              };
               let _ = updateLoan(mutableLoan);
             };
             case (#err(error)) {
               // release lock
-              mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = false } };
+              mutableLoan := {
+                mutableLoan with state = {
+                  mutableLoan.state with inProgress = false
+                };
+              };
               let _ = updateLoan(mutableLoan);
-              return #err(#TokenTransfer{ error; uuid = loanUUID });
+              return #err(#TokenTransfer { error; uuid = loanUUID });
             };
           };
         };
@@ -255,8 +313,8 @@ shared ({ caller = _owner }) actor class Borrow(
 
         switch (transferResult) {
           // Check that the transfer was successful.
-          case (#Ok(_)) { return #ok(amount); };
-          case (#Err(err)) { return #err(#TransferFrom(err)); };
+          case (#Ok(_)) { return #ok(amount) };
+          case (#Err(err)) { return #err(#TransferFrom(err)) };
         };
       };
 
@@ -271,19 +329,19 @@ shared ({ caller = _owner }) actor class Borrow(
         });
 
         switch (transferResult) {
-          case (#Ok(_)) { return #ok(amount); };
-          case (#Err(err)) { return #err(#Transfer(err)); };
+          case (#Ok(_)) { return #ok(amount) };
+          case (#Err(err)) { return #err(#Transfer(err)) };
         };
       };
 
       return #err(#TransferFailed({ message = "Transfer type not supported!" }));
-    } catch(err) {
+    } catch (err) {
       return #err(#TransferFailed({ message = Error.message(err) }));
-    }
+    };
   };
-  
+
   // LOAN HANDLERS
-  private func newLoan(principal: Principal, depositAmount : T.DepositAmount) : async T.Loan {
+  private func newLoan(principal : Principal, depositAmount : T.DepositAmount) : async T.Loan {
     let loan = {
       uuid = LibUUID.toText(await uuidGenerator.new());
       principal;
@@ -293,7 +351,7 @@ shared ({ caller = _owner }) actor class Borrow(
         depositMint = false;
         withdrawTransfer = false;
         withdrawBurn = false;
-        inProgress = false
+        inProgress = false;
       };
     };
 
@@ -301,14 +359,14 @@ shared ({ caller = _owner }) actor class Borrow(
     let _ = activeLoans.add(loan.uuid);
     let _ = Option.get(loansByPrincipal.get(loan.principal), Buffer.Buffer<T.UUID>(initialBufferCapacity)).add(loan.uuid);
 
-    loan
+    return loan;
   };
 
-  private func deleteLoan(loanUUID: T.UUID) : Result.Result<T.Loan, T.LoanError> {
+  private func deleteLoan(loanUUID : T.UUID) : Result.Result<T.Loan, T.LoanError> {
     let loan = loanByUUID.get(loanUUID);
     switch (loan) {
       case (?loan) {
-        activeLoans.filterEntries(func (_, uuid) { uuid == loanUUID });
+        activeLoans.filterEntries(func(_, uuid) { uuid == loanUUID });
         return #ok(loan);
       };
       case (_) {
@@ -317,7 +375,7 @@ shared ({ caller = _owner }) actor class Borrow(
     };
   };
 
-  private func updateLoan(loan: T.Loan): Result.Result<T.UUID, T.LoanError> {
+  private func updateLoan(loan : T.Loan) : Result.Result<T.UUID, T.LoanError> {
     let oldLoanData = loanByUUID.replace(loan.uuid, loan);
     switch (oldLoanData) {
       case (?loan) {
@@ -329,7 +387,7 @@ shared ({ caller = _owner }) actor class Borrow(
     };
   };
 
-  private func getLoan(loanUUID: T.UUID) : Result.Result<T.Loan, T.LoanError> {
+  private func getLoan(loanUUID : T.UUID) : Result.Result<T.Loan, T.LoanError> {
     let loan = loanByUUID.get(loanUUID);
     switch (loan) {
       case (?loan) {
@@ -350,10 +408,10 @@ shared ({ caller = _owner }) actor class Borrow(
     loansByPrincipalStable := Iter.toArray<(Principal, [T.UUID])>(
       Iter.map<(Principal, T.UUIDBuffer), (Principal, [T.UUID])>(
         loansByPrincipal.entries(),
-        func (entry: (Principal, T.UUIDBuffer)) {
+        func(entry : (Principal, T.UUIDBuffer)) {
           let (principal, buffer) = entry;
           return (principal, Buffer.toArray(buffer));
-        }
+        },
       )
     );
   };
@@ -366,14 +424,14 @@ shared ({ caller = _owner }) actor class Borrow(
     loansByPrincipal := HashMap.fromIter<Principal, T.UUIDBuffer>(
       Iter.map<(Principal, [T.UUID]), (Principal, T.UUIDBuffer)>(
         Iter.fromArray(loansByPrincipalStable),
-        func (entry: (Principal, [T.UUID])) {
+        func(entry : (Principal, [T.UUID])) {
           let (principal, uuids) = entry;
           return (principal, Buffer.fromArray(uuids));
-        }
+        },
       ),
       loanByUUIDStable.size(),
       Principal.equal,
-      Principal.hash
+      Principal.hash,
     );
   };
 };
