@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# deploy collateral_token canister
 dfx deploy collateral_token --upgrade-unchanged --argument "
   (variant {
     Init = record {
@@ -30,8 +31,10 @@ dfx deploy collateral_token --upgrade-unchanged --argument "
   })
 "
 
+# create borrow canister (address is needed for stable_token)
 dfx canister create borrow
 
+# deploy stable_token
 dfx deploy stable_token --upgrade-unchanged --argument "
  (variant {
     Init = record {
@@ -55,6 +58,7 @@ dfx deploy stable_token --upgrade-unchanged --argument "
   })
 "
 
+# deploy borrow canister
 dfx deploy borrow --upgrade-unchanged --argument "(
   record {
     collateralToken = (principal \"$(dfx canister id collateral_token)\");
