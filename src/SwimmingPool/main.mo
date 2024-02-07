@@ -100,7 +100,6 @@ shared ({ caller = _owner }) actor class Borrow(
           mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
           let _ = updateLoan(mutableLoan);
 
-          // let burnTokens = await transfer(mutableLoan.principal, mutableLoan.depositAmount, stable_token_actor);
           let burnTokens = await tokenTransfer({
             destination = mutableLoan.principal;
             amount = mutableLoan.depositAmount;
@@ -126,7 +125,7 @@ shared ({ caller = _owner }) actor class Borrow(
           // lock
           mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
           let _ = updateLoan(mutableLoan);
-          // let transferResult = await handle_tokens(mutableLoan.principal, mutableLoan.depositAmount, collateral_token_actor);
+
           let transferResult = await tokenTransfer({
             destination = mutableLoan.principal;
             amount = mutableLoan.depositAmount;
@@ -240,6 +239,7 @@ shared ({ caller = _owner }) actor class Borrow(
   };
 
   // TODO: fee calculations?
+  // single method to handle all the token transfers, this includes minting and burning as well.
   private func tokenTransfer(args : T.TokenTransferArgs) : async Result.Result<T.DepositAmount, T.TransferError> {
     try {
       if (args.typeOfTransfer == "transfer_from"){
