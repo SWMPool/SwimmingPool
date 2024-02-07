@@ -47,7 +47,6 @@ shared ({ caller = _owner }) actor class Borrow(
   private let tenPowerOfEight : Nat64 = 100000000;
   private let tenPowerOfThree : Nat64 = 1000;
 
-
   // SHARED METHODS
   // Accept deposits
   // - user approves transfer: `token_a.icrc2_approve({ spender=borrow_canister; amount=amount; ... })`
@@ -84,8 +83,8 @@ shared ({ caller = _owner }) actor class Borrow(
           uuids,
           func(uuid : T.UUID) {
             switch (getLoan(uuid)) {
-              case (#ok(loan)) { return ?loan; };
-              case (#err(err)) { return null; };
+              case (#ok(loan)) { return ?loan };
+              case (#err(err)) { return null };
             };
           },
         );
@@ -265,8 +264,8 @@ shared ({ caller = _owner }) actor class Borrow(
             };
           };
           let _ = updateLoan(mutableLoan);
-          switch(await calculateMintAmount(mutableLoan.depositAmount)){
-            case (#ok(amount)){
+          switch (await calculateMintAmount(mutableLoan.depositAmount)) {
+            case (#ok(amount)) {
               let mintResult = await tokenTransfer({
                 destination = mutableLoan.principal;
                 amount = Nat64.toNat(amount);
@@ -276,27 +275,28 @@ shared ({ caller = _owner }) actor class Borrow(
               switch (mintResult) {
                 case (#ok(_)) {
                   // update state with successful mint and release lock
-                  mutableLoan := { 
-                    mutableLoan with state = { 
-                      mutableLoan.state with depositMint = true; inProgress = false 
-                    } 
+                  mutableLoan := {
+                    mutableLoan with state = {
+                      mutableLoan.state with depositMint = true;
+                      inProgress = false;
+                    };
                   };
                   let _ = updateLoan(mutableLoan);
                 };
                 case (#err(error)) {
                   // release lock
-                  mutableLoan := { 
-                    mutableLoan with state = { 
-                      mutableLoan.state with inProgress = false 
-                    } 
+                  mutableLoan := {
+                    mutableLoan with state = {
+                      mutableLoan.state with inProgress = false
+                    };
                   };
                   let _ = updateLoan(mutableLoan);
-                  return #err(#TokenTransfer{ error; uuid = loanUUID });
+                  return #err(#TokenTransfer { error; uuid = loanUUID });
                 };
               };
             };
-            case (#err(err)){
-              return #err(#ExchangeRate(err))
+            case (#err(err)) {
+              return #err(#ExchangeRate(err));
             };
           };
         };
@@ -376,7 +376,7 @@ shared ({ caller = _owner }) actor class Borrow(
     let _ = loanByUUID.put(loan.uuid, loan);
     let _ = activeLoans.add(loan.uuid);
     let loansBuffer = loansByPrincipal.get(loan.principal);
-    switch(loansBuffer) {
+    switch (loansBuffer) {
       case (?buffer) {
         let _ = buffer.add(loan.uuid);
       };
@@ -428,7 +428,7 @@ shared ({ caller = _owner }) actor class Borrow(
   };
 
   // XRC METHODS
-  private func getCurrentRate(): async Result.Result<Nat64, T.XRCError> {
+  private func getCurrentRate() : async Result.Result<Nat64, T.XRCError> {
     let request : XRC.GetExchangeRateRequest = {
       base_asset = {
         symbol = "BTC";
@@ -446,30 +446,30 @@ shared ({ caller = _owner }) actor class Borrow(
     Cycles.add(1_000_000_000);
 
     let response = await XRC.get_exchange_rate(request);
-    let _ = switch(transformRespone(response)){
-      case(#ok(value)) {#ok(value)};
-      case(#err(err)) {return #err(err)};
-    }
+    let _ = switch (transformRespone(response)) {
+      case (#ok(value)) { #ok(value) };
+      case (#err(err)) { return #err(err) };
+    };
   };
 
-  private func transformRespone(e: XRC.GetExchangeRateResult): Result.Result<Nat64, T.XRCError> {
-    switch(e) {
+  private func transformRespone(e : XRC.GetExchangeRateResult) : Result.Result<Nat64, T.XRCError> {
+    switch (e) {
       case (#Ok(rate_response)) {
         return #ok(rate_response.rate);
       };
       case (#Err(err)) {
         return #err(#ExchangeRateError(err));
       };
-    }
+    };
   };
   // stablecoint_amount = ( (current_btc_rate / 10^3) * ckBtc_amount ) / 10^8
-  private func calculateMintAmount(ckBtcAmount: Nat): async Result.Result<Nat64, T.XRCError> {
-    let _ = switch(await getCurrentRate()){
-      case(#ok(rate)) {
+  private func calculateMintAmount(ckBtcAmount : Nat) : async Result.Result<Nat64, T.XRCError> {
+    let _ = switch (await getCurrentRate()) {
+      case (#ok(rate)) {
         #ok(((rate / tenPowerOfThree) * Nat64.fromNat(ckBtcAmount)) / tenPowerOfEight);
       };
-      case(#err(err)) {return #err(err)};
-    }
+      case (#err(err)) { return #err(err) };
+    };
   };
 
   // UPGRADE METHODS
