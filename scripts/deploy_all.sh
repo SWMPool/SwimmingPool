@@ -18,7 +18,7 @@ dfx deploy collateral_token --upgrade-unchanged --argument "
         };
       };
       metadata = vec {};
-      transfer_fee = 10_000;
+      transfer_fee = 0;
       archive_options = record {
         trigger_threshold = 2000;
         num_blocks_to_archive = 1000;
@@ -45,7 +45,7 @@ dfx deploy stable_token --upgrade-unchanged --argument "
       };
       initial_balances = vec {};
       metadata = vec {};
-      transfer_fee = 10_000;
+      transfer_fee = 0;
       archive_options = record {
         trigger_threshold = 2000;
         num_blocks_to_archive = 1000;
