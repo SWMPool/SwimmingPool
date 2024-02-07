@@ -91,7 +91,13 @@ shared ({ caller = _owner }) actor class Borrow(
           mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
           let _ = updateLoan(mutableLoan);
 
-          let burnTokens = await transfer(mutableLoan.principal, mutableLoan.depositAmount, stable_token_actor);
+          // let burnTokens = await transfer(mutableLoan.principal, mutableLoan.depositAmount, stable_token_actor);
+          let burnTokens = await tokenTransfer({
+            destination = mutableLoan.principal;
+            amount = mutableLoan.depositAmount;
+            tokenActor = stable_token_actor;
+            typeOfTransfer = "transfer_from";
+          });
           switch (burnTokens) {
             case (#ok(_)) {
               // update state with successful burn and release lock
@@ -111,7 +117,13 @@ shared ({ caller = _owner }) actor class Borrow(
           // lock
           mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
           let _ = updateLoan(mutableLoan);
-          let transferResult = await handle_tokens(mutableLoan.principal, mutableLoan.depositAmount, collateral_token_actor);
+          // let transferResult = await handle_tokens(mutableLoan.principal, mutableLoan.depositAmount, collateral_token_actor);
+          let transferResult = await tokenTransfer({
+            destination = mutableLoan.principal;
+            amount = mutableLoan.depositAmount;
+            tokenActor = collateral_token_actor;
+            typeOfTransfer = "transfer";
+          });
           switch (transferResult) {
             case (#ok(_)) {
               // update state with successful transfer and release lock
@@ -157,7 +169,13 @@ shared ({ caller = _owner }) actor class Borrow(
           mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
           let _ = updateLoan(mutableLoan);
 
-          let transferResult = await transfer(mutableLoan.principal, mutableLoan.depositAmount, collateral_token_actor);
+          // let transferResult = await transfer(mutableLoan.principal, mutableLoan.depositAmount, collateral_token_actor);
+          let transferResult = await tokenTransfer({
+            destination = mutableLoan.principal;
+            amount = mutableLoan.depositAmount;
+            tokenActor = collateral_token_actor;
+            typeOfTransfer = "transfer_from";
+          });
           switch (transferResult) {
             case (#ok(_)) {
               // update state with successful transfer and release lock
@@ -179,7 +197,13 @@ shared ({ caller = _owner }) actor class Borrow(
           mutableLoan := { mutableLoan with state = { mutableLoan.state with inProgress = true } };
           let _ = updateLoan(mutableLoan);
 
-          let mintResult = await handle_tokens(mutableLoan.principal, mutableLoan.depositAmount, stable_token_actor);
+          // let mintResult = await handle_tokens(mutableLoan.principal, mutableLoan.depositAmount, stable_token_actor);
+          let mintResult = await tokenTransfer({
+            destination = mutableLoan.principal;
+            amount = mutableLoan.depositAmount;
+            tokenActor = stable_token_actor;
+            typeOfTransfer = "transfer";
+          });
           switch (mintResult) {
             case (#ok(_)) {
               // update state with successful mint and release lock
@@ -232,6 +256,44 @@ shared ({ caller = _owner }) actor class Borrow(
     };
   };
 
+  private func tokenTransfer(args : T.TokenTransferArgs) : async Result.Result<T.DepositAmount, T.TransferError> {
+    try {
+      if (args.typeOfTransfer == "transfer_from"){
+        let transferResult = await args.tokenActor.icrc2_transfer_from({
+          amount = args.amount;
+          from = { owner = args.destination; subaccount = null };
+          to = { owner = Principal.fromActor(this); subaccount = null };
+          spender_subaccount = null;
+          fee = null;
+          memo = null;
+          created_at_time = null;
+        });
+
+        // Check that the transfer was successful.
+        let transfer = switch (transferResult) {
+          case (#Ok(_)) { #ok(args.amount) };
+          case (#Err(err)) { return #err(#TransferFromError(err)); };
+        };
+      } else {
+          let transferResult = await args.tokenActor.icrc1_transfer({
+            to = { owner = args.destination; subaccount = null };
+            amount = args.amount;
+            from_subaccount = null;
+            memo = null;
+            fee = null;
+            created_at_time = null;
+          });
+
+          // Check that the transfer was successful.
+          let transfer = switch (transferResult) {
+            case (#Ok(_)) { #ok(args.amount) };
+            case (#Err(err)) { return #err(#TransferFailed({ message = "Transfer failed!" })); };
+          };
+      }
+    }catch(err){
+      return #err(#TransferFailed({ message = Error.message(err) }));
+    }
+  };
   // TODO: fee calculations?
   private func handle_tokens(caller: Principal, amount : T.DepositAmount, token_actor: ICRC2_T.TokenInterface) : async Result.Result<T.DepositAmount, T.TransferError> {
     try {

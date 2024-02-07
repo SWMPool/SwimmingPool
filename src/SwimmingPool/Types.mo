@@ -23,6 +23,13 @@ module {
     state: LoanState;
   };
 
+  public type TokenTransferArgs = {
+    destination: Principal;
+    amount: DepositAmount;
+    tokenActor: ICRC2_T.TokenInterface;
+    typeOfTransfer: Text;
+  };
+
   public type LoanError = {
     #LoanNotFound: { uuid: Text };
   };
