@@ -23,6 +23,13 @@ module {
     state: LoanState;
   };
 
+  public type TokenTransferArgs = {
+    destination: Principal;
+    amount: DepositAmount;
+    tokenActor: ICRC2_T.TokenInterface;
+    typeOfTransfer: Text;
+  };
+
   public type LoanError = {
     #LoanNotFound: { uuid: Text };
   };
@@ -39,4 +46,11 @@ module {
     #TransferError : { error: TransferError ; uuid: Text };
     #LoanError : LoanError;
   };
+
+  public type WithdrawError = {
+    #WithdrawInProgress: { uuid: Text };
+    #TransferError : { error: TransferError ; uuid: Text };
+    #LoanError : LoanError;
+    #ReachedUnknownState: { uuid: Text };
+  }
 }
