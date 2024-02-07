@@ -84,8 +84,8 @@ shared ({ caller = _owner }) actor class Borrow(
           uuids,
           func(uuid : T.UUID) {
             switch (getLoan(uuid)) {
-              case (#ok(loan)) { ?loan };
-              case (#err(err)) { null };
+              case (#ok(loan)) { return ?loan; };
+              case (#err(err)) { return null; };
             };
           },
         );
@@ -176,13 +176,17 @@ shared ({ caller = _owner }) actor class Borrow(
               let _ = updateLoan(mutableLoan);
             };
             case (#err(error)) {
-              // release lock
+              // release lock and update loan state
               mutableLoan := {
                 mutableLoan with state = {
                   mutableLoan.state with inProgress = false
                 };
               };
               let _ = updateLoan(mutableLoan);
+
+              // remove loan from active loans
+              let _ = deleteLoan(loanUUID);
+
               return #err(#TokenTransfer { error; uuid = loanUUID });
             };
           };
@@ -371,7 +375,17 @@ shared ({ caller = _owner }) actor class Borrow(
 
     let _ = loanByUUID.put(loan.uuid, loan);
     let _ = activeLoans.add(loan.uuid);
-    let _ = Option.get(loansByPrincipal.get(loan.principal), Buffer.Buffer<T.UUID>(initialBufferCapacity)).add(loan.uuid);
+    let loansBuffer = loansByPrincipal.get(loan.principal);
+    switch(loansBuffer) {
+      case (?buffer) {
+        let _ = buffer.add(loan.uuid);
+      };
+      case (_) {
+        let buffer = Buffer.Buffer<T.UUID>(initialBufferCapacity);
+        let _ = buffer.add(loan.uuid);
+        let _ = loansByPrincipal.put(loan.principal, buffer);
+      };
+    };
 
     return loan;
   };
