@@ -1,98 +1,71 @@
+# Initial setup and upgrade
 
-/// DEPLOY
+### export all needed variables
 ```
-dfx deploy collateral_token --upgrade-unchanged --argument '
- (variant {
-    Init = record {
-      token_name = "Token A";
-      token_symbol = "A";
-      minting_account = record {
-        owner = principal "'${OWNER}'";
-      };
-      initial_balances = vec {
-        record {
-          record {
-            owner = principal "'${USER}'";
-          };
-          100_000_000_000;
-        };
-      };
-      metadata = vec {};
-      transfer_fee = 10_000;
-      archive_options = record {
-        trigger_threshold = 2000;
-        num_blocks_to_archive = 1000;
-        controller_id = principal "'${OWNER}'";
-      };
-      feature_flags = opt record {
-        icrc2 = true;
-      };
-    }
-  })
-'
+chmod +x ./scripts/export.sh
+. ./scripts/export.sh
 ```
 
+### deploy all canisters
 ```
-dfx canister create borrow
-```
-
-```
-dfx deploy stable_token --upgrade-unchanged --argument '
- (variant {
-    Init = record {
-      token_name = "Token A";
-      token_symbol = "A";
-      minting_account = record {
-        owner = principal "'${BORROW_CANISTER_ID}'";
-      };
-      initial_balances = vec {};
-      metadata = vec {};
-      transfer_fee = 10_000;
-      archive_options = record {
-        trigger_threshold = 2000;
-        num_blocks_to_archive = 1000;
-        controller_id = principal "'${OWNER}'";
-      };
-      feature_flags = opt record {
-        icrc2 = true;
-      };
-    }
-  })
-'
+chmod +x ./scripts/deploy_all.sh
+. ./scripts/deploy_all.sh
 ```
 
+###  force upgrade borrow
 ```
-dfx deploy borrow --upgrade-unchanged --argument '(
-  record {
-    coll_token = (principal "'${COLLATERAL_TOKE_CANISTER_ID}'");
-    stable_token = (principal "'${STABLE_TOKE_CANISTER_ID}'");
-  }
-)'
+chmod +x ./scripts/upgrade_borrow.sh
+. ./scripts/upgrade_borrow.sh
 ```
 
-/// CALLS
+# Calls
+## Approval
 ```
-dfx canister call collateral_token icrc2_approve '(record {
-    spender = record { owner = principal "'${BORROW_CANISTER_ID}'" };
+dfx canister call collateral_token icrc2_approve "(record {
+    spender = record { owner = principal \"$(dfx canister id borrow)\" };
     amount = 1_000_000;
-  })' --identity <SOME_IDENTITY>
+  })" --identity $USER_PRINCIPAL_NAME
 ```
 
 ```
-dfx canister call borrow deposit '(record {
-    amount = 100_000;
-  })' --identity <SOME_IDENTITY>
-```
-
-```
-dfx canister call stable_token icrc2_approve '(record {
-    spender = record { owner = principal "'${BORROW_CANISTER_ID}'" };
+dfx canister call stable_token icrc2_approve "(record {
+    spender = record { owner = principal \"$(dfx canister id borrow)\" };
     amount = 1_000_000;
-  })' --identity <SOME_IDENTITY>
+  })" --identity $USER_PRINCIPAL_NAME
+```
+
+## Balance Check
+```
+dfx canister call collateral_token icrc1_balance_of "(record {
+    owner = principal \"$(dfx canister id borrow)\" 
+  })"
 ```
 
 ```
-dfx canister call borrow withdraw '(record {
-    amount = 90_000;
-  })' --identity <SOME_IDENTITY>
+dfx canister call collateral_token icrc1_balance_of "(record {
+    owner = principal \"$USER_PRINCIPAL\" 
+  })"
+```
+
+```
+dfx canister call stable_token icrc1_balance_of "(record {
+    owner = principal \"$(dfx canister id borrow)\"
+  })"
+```
+
+```
+dfx canister call stable_token icrc1_balance_of "(record {
+    owner = principal \"$USER_PRINCIPAL\" 
+  })"
+```
+
+## Borrow canister
+### Shared
+```
+dfx canister call borrow deposit '(10_000)' --identity $USER_PRINCIPAL_NAME
+```
+
+### Query
+```
+dfx canister call borrow getLoanByUUID '("e1329829-6927-46c7-b6e9-a5db74db0f31")'
 ```
