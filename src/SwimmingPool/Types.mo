@@ -23,34 +23,35 @@ module {
     state: LoanState;
   };
 
+  type TokenTransferType = { #TransferFrom; #Transfer };
+
   public type TokenTransferArgs = {
     destination: Principal;
     amount: DepositAmount;
     tokenActor: ICRC2_T.TokenInterface;
-    typeOfTransfer: Text;
+    transferType: TokenTransferType;
   };
 
+  // Errors
+
+  // general loan fetching error
   public type LoanError = {
     #LoanNotFound: { uuid: Text };
   };
 
-  public type TransferError = {
+  // icrc2 token transfer errors
+  public type TokenTransferError = {
     #TransferFailed : { message : Text };
     #MintFailed : { message : Text };
-    #TransferFromError : ICRC2_T.TransferFromError;
+    #TransferFrom : ICRC2_T.TransferFromError;
+    #Transfer: ICRC2_T.TransferError;
   };
 
-  public type DepositError = {
-    #DepositInProgress: { uuid: Text };
+  // combines errors for deposit and withdraw operations
+  public type TransferError = {
+    #InProgress: { uuid: Text };
+    #TokenTransfer : { error: TokenTransferError; uuid: Text };
+    #Loan : LoanError;
     #ReachedUnknownState: { uuid: Text };
-    #TransferError : { error: TransferError ; uuid: Text };
-    #LoanError : LoanError;
   };
-
-  public type WithdrawError = {
-    #WithdrawInProgress: { uuid: Text };
-    #TransferError : { error: TransferError ; uuid: Text };
-    #LoanError : LoanError;
-    #ReachedUnknownState: { uuid: Text };
-  }
 }
