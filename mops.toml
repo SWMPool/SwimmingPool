@@ -1,6 +1,10 @@
 [dependencies]
 base = "0.10.4"
-array = "https://github.com/aviate-labs/array.mo#v0.2.0"
-StableTrieMap = "https://github.com/NatLabs/StableTrieMap#main"
-StableBuffer = "https://github.com/canscale/StableBuffer#v0.2.0"
-itertools = "0.2.1"
+uuid = "1.0.0"
+
+[package]
+name = "swimming_pool"
+version = "0.0.1"
+description = "Collateralised Stablecoin Protocol"
+repository = "https://github.com/SWMPool/SwimmingPool"
+keywords = [ "swimming pool", "collateral", "stable", "token", "dfinity" ]
