@@ -19,10 +19,16 @@ module {
     inProgress : Bool;
   };
 
+  public type DepositState = {
+    satoshiesAtDeposit : Nat;
+    usdtRateAtDeposit: Nat64;
+    mintAmount: Nat;
+  };
+
   public type Loan = {
     uuid: UUID;
     principal: Principal;
-    depositAmount : DepositAmount;
+    deposit : DepositState;
     state: LoanState;
   };
 

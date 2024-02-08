@@ -52,8 +52,15 @@ shared ({ caller = _owner }) actor class Borrow(
   // - user approves transfer: `token_a.icrc2_approve({ spender=borrow_canister; amount=amount; ... })`
   // - user deposits their token: `borrow_canister.deposit(amount)`
   public shared ({ caller }) func deposit(amount : T.DepositAmount) : async Result.Result<T.UUID, T.TransferError> {
-    let loan = await newLoan(caller, amount);
-    return await depositHelper(loan.uuid);
+    switch(await getCurrentRate()){
+      case (#ok(rate)){
+        let loan = await newLoan(caller, amount, rate);
+        return await depositHelper(loan.uuid);
+      };
+      case (#err(err)){
+        return #err(err)
+      }
+    };
   };
 
   // Withdraw deposits
@@ -120,7 +127,7 @@ shared ({ caller = _owner }) actor class Borrow(
 
           let burnTokens = await tokenTransfer({
             destination = mutableLoan.principal;
-            amount = mutableLoan.depositAmount;
+            amount = mutableLoan.deposit.mintAmount;
             tokenActor = stableTokenActor;
             transferType = #TransferFrom;
           });
@@ -159,7 +166,7 @@ shared ({ caller = _owner }) actor class Borrow(
 
           let transferResult = await tokenTransfer({
             destination = mutableLoan.principal;
-            amount = mutableLoan.depositAmount;
+            amount = mutableLoan.deposit.satoshiesAtDeposit;
             tokenActor = collateralTokenActor;
             transferType = #Transfer;
           });
@@ -227,7 +234,7 @@ shared ({ caller = _owner }) actor class Borrow(
 
           let transferResult = await tokenTransfer({
             destination = mutableLoan.principal;
-            amount = mutableLoan.depositAmount;
+            amount = mutableLoan.deposit.satoshiesAtDeposit;
             tokenActor = collateralTokenActor;
             transferType = #TransferFrom;
           });
@@ -264,39 +271,32 @@ shared ({ caller = _owner }) actor class Borrow(
             };
           };
           let _ = updateLoan(mutableLoan);
-          switch (await calculateMintAmount(mutableLoan.depositAmount)) {
-            case (#ok(amount)) {
-              let mintResult = await tokenTransfer({
-                destination = mutableLoan.principal;
-                amount = Nat64.toNat(amount);
-                tokenActor = stableTokenActor;
-                transferType = #Transfer;
-              });
-              switch (mintResult) {
-                case (#ok(_)) {
-                  // update state with successful mint and release lock
-                  mutableLoan := {
-                    mutableLoan with state = {
-                      mutableLoan.state with depositMint = true;
-                      inProgress = false;
-                    };
-                  };
-                  let _ = updateLoan(mutableLoan);
-                };
-                case (#err(error)) {
-                  // release lock
-                  mutableLoan := {
-                    mutableLoan with state = {
-                      mutableLoan.state with inProgress = false
-                    };
-                  };
-                  let _ = updateLoan(mutableLoan);
-                  return #err(#TokenTransfer { error; uuid = loanUUID });
+          let mintResult = await tokenTransfer({
+            destination = mutableLoan.principal;
+            amount = mutableLoan.deposit.mintAmount;
+            tokenActor = stableTokenActor;
+            transferType = #Transfer;
+          });
+          switch (mintResult) {
+            case (#ok(_)) {
+              // update state with successful mint and release lock
+              mutableLoan := {
+                mutableLoan with state = {
+                  mutableLoan.state with depositMint = true;
+                  inProgress = false;
                 };
               };
+              let _ = updateLoan(mutableLoan);
             };
-            case (#err(err)) {
-              return #err(#ExchangeRate(err));
+            case (#err(error)) {
+              // release lock
+              mutableLoan := {
+                mutableLoan with state = {
+                  mutableLoan.state with inProgress = false
+                };
+              };
+              let _ = updateLoan(mutableLoan);
+              return #err(#TokenTransfer { error; uuid = loanUUID });
             };
           };
         };
@@ -359,11 +359,16 @@ shared ({ caller = _owner }) actor class Borrow(
   };
 
   // LOAN HANDLERS
-  private func newLoan(principal : Principal, depositAmount : T.DepositAmount) : async T.Loan {
+  private func newLoan(principal : Principal, depositAmount : T.DepositAmount, rate: Nat64) : async T.Loan {
+    let amountToMint = calculateMintAmount(depositAmount, rate);
     let loan = {
       uuid = LibUUID.toText(await uuidGenerator.new());
       principal;
-      depositAmount;
+      deposit = {
+        satoshiesAtDeposit = depositAmount;
+        usdtRateAtDeposit = rate;
+        mintAmount = Nat64.toNat(amountToMint);
+      };
       state = {
         depositTransfer = false;
         depositMint = false;
@@ -428,7 +433,7 @@ shared ({ caller = _owner }) actor class Borrow(
   };
 
   // XRC METHODS
-  private func getCurrentRate() : async Result.Result<Nat64, T.XRCError> {
+  private func getCurrentRate() : async Result.Result<Nat64, T.TransferError> {
     let request : XRC.GetExchangeRateRequest = {
       base_asset = {
         symbol = "BTC";
@@ -448,7 +453,7 @@ shared ({ caller = _owner }) actor class Borrow(
     let response = await XRC.get_exchange_rate(request);
     let _ = switch (transformRespone(response)) {
       case (#ok(value)) { #ok(value) };
-      case (#err(err)) { return #err(err) };
+      case (#err(err)) { return #err(#ExchangeRate(err)) };
     };
   };
 
@@ -462,14 +467,10 @@ shared ({ caller = _owner }) actor class Borrow(
       };
     };
   };
+
   // stablecoint_amount = ( (current_btc_rate / 10^3) * ckBtc_amount ) / 10^8
-  private func calculateMintAmount(ckBtcAmount : Nat) : async Result.Result<Nat64, T.XRCError> {
-    let _ = switch (await getCurrentRate()) {
-      case (#ok(rate)) {
-        #ok(((rate / tenPowerOfThree) * Nat64.fromNat(ckBtcAmount)) / tenPowerOfEight);
-      };
-      case (#err(err)) { return #err(err) };
-    };
+  private func calculateMintAmount(ckBtcAmount : Nat, rate: Nat64) : Nat64 {
+    ((rate / tenPowerOfThree) * Nat64.fromNat(ckBtcAmount)) / tenPowerOfEight
   };
 
   // UPGRADE METHODS
