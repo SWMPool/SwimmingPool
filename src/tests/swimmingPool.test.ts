@@ -56,7 +56,7 @@ test("should approve transfer from stable", async () => {
     subaccount: []
   });
 
-  const _ = await stableTokenActor.icrc2_approve({
+  const approveAllowanceForBorrower = await stableTokenActor.icrc2_approve({
     fee: [],
     amount: balance,
     memo: [],
@@ -70,7 +70,7 @@ test("should approve transfer from stable", async () => {
     }
   });
   
-  const result2 = await stableTokenActor.icrc2_allowance({
+  const allowanceForBorrower = await stableTokenActor.icrc2_allowance({
     account: {
         owner: Principal.fromText(process.env.USER_PRINCIPAL as string),
         subaccount: []
@@ -81,13 +81,13 @@ test("should approve transfer from stable", async () => {
     }
   }) as Allowance;
   
-  expect(result2.allowance).toEqual(balance);
+  expect(allowanceForBorrower.allowance).toEqual(balance);
 });
 
 test("should withdraw", async () => {
-  const result = await borrowActor.withdraw(loanId);
+  const withdrawResponse = await borrowActor.withdraw(loanId);
 
-  expect(result).toHaveProperty('ok');
+  expect(withdrawResponse).toHaveProperty('ok');
 })
 
 test("should have current balance equal to initial balance", async () => {
