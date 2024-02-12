@@ -73,6 +73,33 @@ npm start
 
 Which will start a server at `http://localhost:8080`, proxying API requests to the replica at port 4943.
 
+## Testing locally
+To run tests there are couple of prerequisites, first you need your 24 seed phrases, if you don't have them saved, create a new account by running
+```bash
+dfx identity new <NAME>
+```
+with the newly aquired seed phrases navigate to `src/tests/identity.ts` paste them in the `seed` variable.
+Next, run the network locally by running
+```bash
+dfx start --background --clean
+```
+navigate to scripts/export.sh make sure that `USER_PRINCIPAL` and `USER_PRINCIPAL_NAME` are set to the ones you've created earlier, if you are unsure how to get your Principal, you can do that by
+```bash
+dfx identity get-principal --identity <NAME>
+```
+Next, run the deploy all script and after all the canisters have been deployed, run
+```bash
+dfx generate
+```
+this will create a `declarations` folder which we need, follow it by
+```bash
+npm install
+```
+which will install the testing library we are using and some other needed modules. Run the tests by
+```bash
+npm test
+```
+
 ### Note on frontend environment variables
 
 If you are hosting frontend code somewhere without using DFX, you may need to make one of the following adjustments to ensure your project does not fetch the root key in production:

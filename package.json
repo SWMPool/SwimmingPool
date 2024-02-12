@@ -1,0 +1,32 @@
+{
+  "name": "swimmingpool",
+  "version": "1.0.0",
+  "description": "### Collateralised Stablecoin Protocol",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SWMPool/SwimmingPool.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/SWMPool/SwimmingPool/issues"
+  },
+  "homepage": "https://github.com/SWMPool/SwimmingPool#readme",
+  "devDependencies": {
+    "@types/node": "^20.11.17",
+    "isomorphic-fetch": "^3.0.0",
+    "vitest": "^1.2.2"
+  },
+  "dependencies": {
+    "@dfinity/agent": "^0.21.4",
+    "@dfinity/identity": "^0.21.4",
+    "@dfinity/identity-secp256k1": "^0.21.4",
+    "@dfinity/principal": "^0.21.4",
+    "bip39": "^3.1.0",
+    "hdkey": "^2.1.0"
+  }
+}
