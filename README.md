@@ -95,9 +95,9 @@ this will create a `declarations` folder which we need, follow it by
 ```bash
 npm install
 ```
-which will install the testing library we are using and some other needed modules. Run the tests by
+which will install the testing library we are using and some other needed modules. Run the tests by 
 ```bash
-npm test
+npm test // make sure to call . ./scripts/export.sh in the same terminal before you run the tests
 ```
 
 ### Note on frontend environment variables
